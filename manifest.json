@@ -1,6 +1,6 @@
 {
     "name": "starfinders_modpack",
-    "version_number": "1.0.0",
+    "version_number": "1.0.1",
     "website_url": "https://github.com/ryandamen/starfinders_valheim",
     "description": "Modpack for the starfinders valheim private server",
     "dependencies": [
