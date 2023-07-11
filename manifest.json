@@ -1,0 +1,25 @@
+{
+    "name": "starfinders_modpack",
+    "version_number": "1.0.0",
+    "website_url": "https://github.com/ryandamen/starfinders_valheim",
+    "description": "Modpack for the starfinders valheim private server",
+    "dependencies": [
+        "denikson-BepInExPack_Valheim-5.4.1901",
+        "Azumatt-AzuCraftyBoxes-1.1.9",
+        "Azumatt-Build_Camera_Custom_Hammers_Edition-1.1.3",
+        "Azumatt-FirstPersonMode-1.1.3",
+        "Azumatt-Official_BepInEx_ConfigurationManager-18.0.1",
+        "Goldenrevolver-Quick_Stack_Store_Sort_Trash_Restock-1.4.0",
+        "Goldenrevolver-Sorted_Menus_Cooking_Crafting_and_Skills_Menu-1.2.2",
+        "HugotheDwarf-More_and_Modified_Player_Cloth_Colliders-3.1.0",
+        "JereKuusela-Smoke_Collision-1.6.0",
+        "MSchmoecker-ContentsWithin-2.1.1",
+        "ValheimModding-Jotunn-2.12.3",
+        "MSchmoecker-MultiUserChest-0.5.2",
+        "TastyChickenLegs-AutomaticFuel-1.3.7",
+        "RandyKnapp-EquipmentAndQuickSlots-2.1.6",
+        "TastyChickenLegs-BetterCarts-1.0.4",
+        "TastyChickenLegs-BlastFurnaceTakesAll-1.0.3",
+        "Thordomr-Display_Day_and_Time_in_HUD-1.1.2"
+    ]
+}
