@@ -1,0 +1,40 @@
+name: Zip Files
+on:
+  push:
+    branches:
+      - main  # Replace with your desired branch name
+
+jobs:
+  zip-files:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Install zip
+        run: sudo apt-get install zip
+
+      - name: Zip files
+        run: |
+          zip -r files.zip icon.png manifest.json README.md config/
+
+      - name: Commit and push zip file
+        uses: actions/github-script@v3
+        if: ${{ github.actor != 'github-actions[bot]' }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const filePath = path.join(process.env.GITHUB_WORKSPACE, 'files.zip');
+            const data = fs.readFileSync(filePath);
+
+            const octokit = github.getOctokit(process.env.GITHUB_TOKEN);
+            octokit.rest.repos.createOrUpdateFileContents({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              path: 'files.zip',
+              message: 'Add zip file',
+              content: Buffer.from(data).toString('base64'),
+              branch: context.ref.replace('refs/heads/', ''),
+            });
