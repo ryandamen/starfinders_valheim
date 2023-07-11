@@ -3,8 +3,8 @@ on:
   push:
     branches:
         - main  # Replace with your desired branch name
-    paths-ignore:
-        - '.github/workflows/zip-files.yml'  # Exclude the workflow file itself
+    # paths-ignore:
+    #     - '.github/workflows/zip_files.yml'  # Exclude the workflow file itself
 
 jobs:
   zip-files:
