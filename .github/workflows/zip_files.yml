@@ -2,9 +2,9 @@ name: Zip Files
 on:
   push:
     branches:
-      - main  # Replace with your desired branch name
+        - main  # Replace with your desired branch name
     paths-ignore:
-      - '.github/workflows/zip-files.yml'  # Exclude the workflow file itself
+        - '.github/workflows/zip-files.yml'  # Exclude the workflow file itself
 
 jobs:
   zip-files:
@@ -17,26 +17,11 @@ jobs:
         run: sudo apt-get install zip
 
       - name: Zip files
-        run: |
-          zip -r files.zip icon.png manifest.json README.md config/
+        run: zip -r files.zip icon.png manifest.json README.md config/
 
       - name: Commit and push zip file
-        uses: actions/github-script@v3
-        if: ${{ github.actor != 'github-actions[bot]' }}
+        uses: stefanzweifel/git-auto-commit-action@v4
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            const path = require('path');
-            const filePath = path.join(process.env.GITHUB_WORKSPACE, 'files.zip');
-            const data = fs.readFileSync(filePath);
-
-            const octokit = github.getOctokit(process.env.GITHUB_TOKEN);
-            octokit.rest.repos.createOrUpdateFileContents({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              path: 'files.zip',
-              message: 'Add zip file',
-              content: Buffer.from(data).toString('base64'),
-              branch: context.ref.replace('refs/heads/', ''),
-            });
+          commit_message: Add zip file
+          file_pattern: files.zip
+          branch: main  # Replace with your desired branch name
