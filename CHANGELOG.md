@@ -1,1 +1,1 @@
-Add server specific conigs to config folder
+Add server specific configs to config folder
