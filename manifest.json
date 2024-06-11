@@ -1,6 +1,6 @@
 {
     "name": "starfinders_modpack",
-    "version_number": "1.7.0",
+    "version_number": "1.7.1",
     "website_url": "https://github.com/ryandamen/starfinders_valheim",
     "description": "Modpack for the starfinders valheim private server",
     "dependencies": [
@@ -32,6 +32,7 @@
         "RandyKnapp-ImprovedBuildHud-1.0.7",
         "RandyKnapp-MinimalStatusEffects-1.0.7",
         "Riintouge-LongerPetNames-1.0.0",
+        "Smoothbrain-Groups-1.2.8",
         "Smoothbrain-HildirsQuest-1.0.2",
         "Smoothbrain-SteadyRegeneration-1.0.2",
         "Smoothbrain-TargetPortal-1.1.18",
