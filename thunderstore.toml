@@ -8,6 +8,7 @@ versionNumber = "0.0.1"
 description = "Modpack for the starfinders valheim private server"
 websiteUrl = "https://github.com/ryandamen/starfinders_valheim"
 containsNsfwContent = false
+
 [package.dependencies]
 denikson-BepInExPack_Valheim = "5.4.2351"
 ValheimModding-Jotunn = "2.30.2"

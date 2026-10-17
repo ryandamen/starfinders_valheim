@@ -26,6 +26,7 @@ jobs:
           path: .
           categories: |
             modpacks
+            deep-north-update
 
       - name: Create GitHub Release
         if: success()
