@@ -18,7 +18,7 @@ jobs:
         with:
           token: ${{ secrets.THUNDERSTORE_API_TOKEN }}
           community: valheim
-          namespace: starfinders
+          namespace: Starfinders
           name: starfinders_modpack
           description: Modpack for the Starfinders private Valheim server
           version: ${{ github.ref_name }}
