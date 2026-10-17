@@ -1,0 +1,65 @@
+name: Publish ThunderStore release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build release package
+        shell: bash
+        env:
+          PACKAGE_NAME: starfinders_modpack
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME}"
+          echo "PACKAGE_VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "PACKAGE_NAME=starfinders_modpack" >> "$GITHUB_ENV"
+
+          mkdir -p dist staging
+          cp manifest.json staging/manifest.json
+
+          python - <<'PY'
+          import json, os
+          with open('staging/manifest.json', 'r', encoding='utf-8') as f:
+              manifest = json.load(f)
+          manifest['version_number'] = os.environ['PACKAGE_VERSION']
+          with open('staging/manifest.json', 'w', encoding='utf-8') as f:
+              json.dump(manifest, f, indent=4)
+              f.write('\n')
+          PY
+
+          cp README.md icon.png staging/
+          if [ -d config ]; then cp -R config staging/; fi
+
+          cd staging
+          zip -r "../dist/${PACKAGE_NAME}-${PACKAGE_VERSION}.zip" . >/dev/null
+          cd ..
+
+      - name: Publish to ThunderStore
+        shell: bash
+        env:
+          THUNDERSTORE_API_TOKEN: ${{ secrets.THUNDERSTORE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          dotnet tool install --global TCLI
+          export PATH="$PATH:$HOME/.dotnet/tools"
+
+          echo "Publishing starfinders-${PACKAGE_NAME} ${PACKAGE_VERSION} to valheim"
+
+          tcli publish \
+            --community "valheim" \
+            --file "dist/${PACKAGE_NAME}-${PACKAGE_VERSION}.zip" \
+            --package "${PACKAGE_NAME}" \
+            --category "modpack" \
+            --version "${PACKAGE_VERSION}" \
+            --token "${THUNDERSTORE_API_TOKEN}"
