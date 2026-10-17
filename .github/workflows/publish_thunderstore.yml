@@ -41,6 +41,14 @@ jobs:
               f.write('\n')
           PY
 
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('thunderstore.toml')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('version = "0.0.0"', f'version = "{__import__("os").environ["PACKAGE_VERSION"]}"')
+          path.write_text(text, encoding='utf-8')
+          PY
+
           cp README.md icon.png staging/
           if [ -d config ]; then cp -R config staging/; fi
 
@@ -57,12 +65,9 @@ jobs:
           dotnet tool install --global TCLI
           export PATH="$PATH:$HOME/.dotnet/tools"
 
-          echo "Publishing starfinders-${PACKAGE_NAME} ${PACKAGE_VERSION} to valheim"
+          echo "Publishing ${PACKAGE_NAME} ${PACKAGE_VERSION} to Valheim"
 
           tcli publish \
-            --community "valheim" \
+            --config-path "./thunderstore.toml" \
             --file "dist/${PACKAGE_NAME}-${PACKAGE_VERSION}.zip" \
-            --package "${PACKAGE_NAME}" \
-            --category "modpack" \
-            --version "${PACKAGE_VERSION}" \
             --token "${THUNDERSTORE_API_TOKEN}"

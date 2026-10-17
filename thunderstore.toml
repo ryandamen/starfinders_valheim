@@ -1,0 +1,13 @@
+[general]
+repository = "https://thunderstore.io"
+
+[package]
+namespace = "starfinders"
+name = "starfinders_modpack"
+version = "0.0.0"
+
+[publish]
+communities = ["valheim"]
+
+[publish.categories]
+valheim = ["modpacks"]
