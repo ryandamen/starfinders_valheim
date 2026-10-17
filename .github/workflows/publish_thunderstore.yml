@@ -22,6 +22,9 @@ jobs:
           set -euo pipefail
 
           VERSION="${GITHUB_REF_NAME}"
+          export PACKAGE_VERSION="${VERSION}"
+          export PACKAGE_NAME="starfinders_modpack"
+
           echo "PACKAGE_VERSION=${VERSION}" >> "$GITHUB_ENV"
           echo "PACKAGE_NAME=starfinders_modpack" >> "$GITHUB_ENV"
 
