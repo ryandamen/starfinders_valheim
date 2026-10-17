@@ -19,15 +19,15 @@ jobs:
         id: publish
         uses: GreenTF/upload-thunderstore-package@v4.3
         with:
+          token: ${{ secrets.THUNDERSTORE_API_TOKEN }}
+          community: valheim
           namespace: starfinders
           name: starfinders_modpack
-          description: Modpack for the Starfinders private Valheim & Friends server
-          token: ${{ secrets.THUNDERSTORE_API_TOKEN }}
+          description: Modpack for the Starfinders private Valheim server
           version: ${{ github.ref_name }}
-          community: valheim
+          path: .
           categories: |
             modpacks
-          path: .
 
       - name: Create GitHub Release
         if: success()
