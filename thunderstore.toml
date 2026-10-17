@@ -2,7 +2,7 @@
 schemaVersion = "0.0.1"
 
 [package]
-namespace = "starfinders"
+namespace = "Starfinders"
 name = "starfinders_modpack"
 versionNumber = "0.0.1"
 description = "Modpack for the starfinders valheim private server"

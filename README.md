@@ -13,7 +13,7 @@ Create this repository secret in GitHub:
 Create a version tag and push it:
 
 ```bash
-VERSION = 2.3.0
+VERSION=2.3.2
 git tag $VERSION
 git push origin $VERSION
 ```
