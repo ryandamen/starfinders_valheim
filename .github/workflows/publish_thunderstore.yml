@@ -1,73 +1,38 @@
 name: Publish ThunderStore release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - '*'
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build release package
-        shell: bash
-        env:
-          PACKAGE_NAME: starfinders_modpack
-        run: |
-          set -euo pipefail
-
-          VERSION="${GITHUB_REF_NAME}"
-          export PACKAGE_VERSION="${VERSION}"
-          export PACKAGE_NAME="starfinders_modpack"
-
-          echo "PACKAGE_VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "PACKAGE_NAME=starfinders_modpack" >> "$GITHUB_ENV"
-
-          mkdir -p dist staging
-          cp manifest.json staging/manifest.json
-
-          python - <<'PY'
-          import json, os
-          with open('staging/manifest.json', 'r', encoding='utf-8') as f:
-              manifest = json.load(f)
-          manifest['version_number'] = os.environ['PACKAGE_VERSION']
-          with open('staging/manifest.json', 'w', encoding='utf-8') as f:
-              json.dump(manifest, f, indent=4)
-              f.write('\n')
-          PY
-
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('thunderstore.toml')
-          text = path.read_text(encoding='utf-8')
-          text = text.replace('version = "0.0.0"', f'version = "{__import__("os").environ["PACKAGE_VERSION"]}"')
-          path.write_text(text, encoding='utf-8')
-          PY
-
-          cp README.md icon.png staging/
-          if [ -d config ]; then cp -R config staging/; fi
-
-          cd staging
-          zip -r "../dist/${PACKAGE_NAME}-${PACKAGE_VERSION}.zip" . >/dev/null
-          cd ..
-
       - name: Publish to ThunderStore
-        shell: bash
-        env:
-          THUNDERSTORE_API_TOKEN: ${{ secrets.THUNDERSTORE_API_TOKEN }}
-        run: |
-          set -euo pipefail
-          dotnet tool install --global TCLI
-          export PATH="$PATH:$HOME/.dotnet/tools"
+        id: publish
+        uses: GreenTF/upload-thunderstore-package@v4.3
+        with:
+          namespace: starfinders
+          name: starfinders_modpack
+          description: Modpack for the Starfinders private Valheim & Friends server
+          token: ${{ secrets.THUNDERSTORE_API_TOKEN }}
+          version: ${{ github.ref_name }}
+          community: valheim
+          categories: |
+            modpacks
+          path: .
 
-          echo "Publishing ${PACKAGE_NAME} ${PACKAGE_VERSION} to Valheim"
-
-          tcli publish \
-            --config-path "./thunderstore.toml" \
-            --file "dist/${PACKAGE_NAME}-${PACKAGE_VERSION}.zip" \
-            --token "${THUNDERSTORE_API_TOKEN}"
+      - name: Create GitHub Release
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
