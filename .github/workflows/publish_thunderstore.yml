@@ -8,9 +8,6 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -25,6 +22,7 @@ jobs:
           name: starfinders_modpack
           description: Modpack for the Starfinders private Valheim server
           version: ${{ github.ref_name }}
+          repo: https://thunderstore.io
           path: .
           categories: |
             modpacks

@@ -13,8 +13,9 @@ Create this repository secret in GitHub:
 Create a version tag and push it:
 
 ```bash
-git tag 2.0.1
-git push origin 2.0.1
+VERSION = 2.3.0
+git tag $VERSION
+git push origin $VERSION
 ```
 
 The workflow uses the tag name as the package version, so `2.0.1` becomes the ThunderStore package version.
