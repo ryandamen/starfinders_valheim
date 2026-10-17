@@ -1,15 +1,22 @@
 # starfinders_valheim
-Modpack for the starfinders private Valheim & Friends server
+Modpack for the Starfinders private Valheim & Friends server.
 
 ## ThunderStore publishing
-This repo publishes to ThunderStore only when a GitHub Release is created.
+This repository publishes to ThunderStore automatically when a git tag is pushed.
 
-### Required GitHub secrets
-Create repository secrets in GitHub:
+### Required GitHub secret
+Create this repository secret in GitHub:
 
 - `THUNDERSTORE_API_TOKEN` — your ThunderStore API token
 
-### Exmple how to release
-- Create a GitHub release tag like: `1.0.0`
+### Release process
+Create a version tag and push it:
 
-The workflow now builds and publishes the modpack as version `1.8.0` to ThunderStore.
+```bash
+git tag 2.0.1
+git push origin 2.0.1
+```
+
+The workflow uses the tag name as the package version, so `2.0.1` becomes the ThunderStore package version.
+
+The workflow publishes the package and then creates a GitHub Release for the same tag if the upload succeeds.
