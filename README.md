@@ -14,8 +14,7 @@ Create a version tag and push it:
 
 ```bash
 VERSION=2.3.2
-git tag $VERSION
-git push origin $VERSION
+git tag $VERSION && git push origin $VERSION
 ```
 
 The workflow uses the tag name as the package version, so `2.0.1` becomes the ThunderStore package version.

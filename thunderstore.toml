@@ -15,6 +15,7 @@ readme = "./README.md"
 outdir = "./build"
 
 [package.dependencies]
+# Dependancies must be declared in the CICD instead
 
 [[build.copy]]
 source = "./dist"
