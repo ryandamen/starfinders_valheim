@@ -20,4 +20,6 @@ git push origin $VERSION
 
 The workflow uses the tag name as the package version, so `2.0.1` becomes the ThunderStore package version.
 
+The required mods are passed through the publishing action's `deps` input in the workflow. The action replaces the dependency list in `thunderstore.toml`, so keep that input in sync with the manifest.
+
 The workflow publishes the package and then creates a GitHub Release for the same tag if the upload succeeds.
