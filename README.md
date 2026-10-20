@@ -25,7 +25,7 @@ This action replaces the dependency list in `thunderstore.toml` so that one can 
 Create a version tag and push it:
 
 ```bash
-VERSION=3.2.0
+VERSION=3.2.3
 git tag $VERSION && git push origin $VERSION
 ```
 

@@ -61,6 +61,8 @@ jobs:
           --owner "$PACKAGE_OWNER"
           --name "$PACKAGE_NAME"
           --version "$PACKAGE_VERSION"
+          --interval-minutes 10
+          --max-checks 50
 
       - name: Create GitHub Release
         if: success()
