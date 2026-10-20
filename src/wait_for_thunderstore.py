@@ -1,29 +1,69 @@
 """Wait until a package version is active in the Thunderstore feed."""
 
+import argparse
 import json
-import os
+import logging
 import time
 import urllib.request
 
 FEED_URL = "https://thunderstore.io/c/valheim/api/v1/package/"
-INTERVAL_SECONDS = 5 * 60
-MAX_CHECKS = 50
+DEFAULT_INTERVAL_MINUTES = 5
+DEFAULT_MAX_CHECKS = 50
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Wait for a package version to become active on Thunderstore."
+    )
+    parser.add_argument("--owner", required=True, help="Thunderstore package owner")
+    parser.add_argument("--name", required=True, help="Thunderstore package name")
+    parser.add_argument("--version", required=True, help="Package version to wait for")
+    parser.add_argument(
+        "--interval-minutes",
+        type=int,
+        default=DEFAULT_INTERVAL_MINUTES,
+        help=f"Minutes between checks (default: {DEFAULT_INTERVAL_MINUTES})",
+    )
+    parser.add_argument(
+        "--max-checks",
+        type=int,
+        default=DEFAULT_MAX_CHECKS,
+        help=f"Maximum number of checks (default: {DEFAULT_MAX_CHECKS})",
+    )
+    args = parser.parse_args()
+    if args.interval_minutes < 1:
+        parser.error("--interval-minutes must be at least 1")
+    if args.max_checks < 1:
+        parser.error("--max-checks must be at least 1")
+    return args
 
 
 def main():
-    owner = os.environ["PACKAGE_OWNER"]
-    name = os.environ["PACKAGE_NAME"]
-    version = os.environ["PACKAGE_VERSION"]
-    started_at = time.monotonic()
+    args = parse_args()
+    interval_seconds = args.interval_minutes * 60
+    last_check_at = time.monotonic()
 
-    print(
-        f"Waiting for {owner}-{name} {version} to become active in the "
-        f"Thunderstore feed. Checking every {INTERVAL_SECONDS // 60} minutes "
-        f"for up to {MAX_CHECKS} checks.",
-        flush=True,
+    logger.info(
+        "Waiting for %s-%s %s to become active in the Thunderstore feed. "
+        "Checking every %s minutes for up to %s checks.",
+        args.owner,
+        args.name,
+        args.version,
+        args.interval_minutes,
+        args.max_checks,
     )
 
-    for check in range(MAX_CHECKS):
+    for check in range(args.max_checks):
+        elapsed = time.monotonic() - last_check_at
+        time.sleep(max(0, interval_seconds - elapsed))
+        last_check_at = time.monotonic()
+
         try:
             with urllib.request.urlopen(FEED_URL, timeout=30) as response:
                 packages = json.load(response)
@@ -31,42 +71,48 @@ def main():
                 raise ValueError("Thunderstore package feed did not return a list")
 
             available = any(
-                package.get("owner") == owner
-                and package.get("name") == name
+                package.get("owner") == args.owner
+                and package.get("name") == args.name
                 and any(
-                    package_version.get("version_number") == version
+                    package_version.get("version_number") == args.version
                     and package_version.get("is_active") is True
                     for package_version in package.get("versions", [])
                 )
                 for package in packages
             )
         except (OSError, json.JSONDecodeError, ValueError) as error:
-            print(
-                f"Check {check + 1}/{MAX_CHECKS}: Thunderstore feed check failed: {error}",
-                flush=True,
+            logger.warning(
+                "Check %s/%s: Thunderstore feed check failed: %s",
+                check + 1,
+                args.max_checks,
+                error,
             )
         else:
             if available:
-                print(
-                    f"{owner}-{name} {version} is active in the Thunderstore feed.",
-                    flush=True,
+                logger.info(
+                    "%s-%s %s is active in the Thunderstore feed.",
+                    args.owner,
+                    args.name,
+                    args.version,
                 )
                 return
-            print(
-                f"Check {check + 1}/{MAX_CHECKS}: version is not active in the "
-                "Thunderstore feed yet.",
-                flush=True,
+            logger.info(
+                "Check %s/%s: version is not active in the Thunderstore feed yet.",
+                check + 1,
+                args.max_checks,
             )
 
-        if check + 1 == MAX_CHECKS:
-            raise SystemExit(
-                f"Timed out waiting for {owner}-{name} {version} to become active "
-                f"in the Thunderstore feed after {MAX_CHECKS} checks spaced "
-                f"{INTERVAL_SECONDS // 60} minutes apart."
+        if check + 1 == args.max_checks:
+            logger.error(
+                "Timed out waiting for %s-%s %s to become active in the "
+                "Thunderstore feed after %s checks spaced %s minutes apart.",
+                args.owner,
+                args.name,
+                args.version,
+                args.max_checks,
+                args.interval_minutes,
             )
-
-        next_check_at = started_at + (check + 1) * INTERVAL_SECONDS
-        time.sleep(max(0, next_check_at - time.monotonic()))
+            raise SystemExit(1)
 
 
 if __name__ == "__main__":

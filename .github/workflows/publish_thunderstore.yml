@@ -56,7 +56,11 @@ jobs:
           PACKAGE_OWNER: Starfinders
           PACKAGE_NAME: starfinders_modpack
           PACKAGE_VERSION: ${{ github.ref_name }}
-        run: python3 src/wait_for_thunderstore.py
+        run: >-
+          python src/wait_for_thunderstore.py
+          --owner "$PACKAGE_OWNER"
+          --name "$PACKAGE_NAME"
+          --version "$PACKAGE_VERSION"
 
       - name: Create GitHub Release
         if: success()
