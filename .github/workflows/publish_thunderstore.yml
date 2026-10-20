@@ -116,3 +116,15 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           generate_release_notes: true
+
+      - name: Notify Discord
+        uses: Ilshidur/action-discord@ad5235de713df3ef38022185499b02ffe93b7efe
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          PACKAGE_VERSION: ${{ github.ref_name }}
+          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}
+        with:
+          args: |
+            **Starfinders modpack {{ PACKAGE_VERSION }} is now available!**
+            Install it from Thunderstore: https://thunderstore.io/c/valheim/p/Starfinders/starfinders_modpack/
+            GitHub release: {{ RELEASE_URL }}
