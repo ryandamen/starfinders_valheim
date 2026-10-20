@@ -1,4 +1,4 @@
-"""Wait until a package version is active in the Thunderstore feed."""
+"""Poll Thunderstore until a package version becomes active."""
 
 import argparse
 import json

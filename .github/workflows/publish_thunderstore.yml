@@ -57,7 +57,7 @@ jobs:
           PACKAGE_NAME: starfinders_modpack
           PACKAGE_VERSION: ${{ github.ref_name }}
         run: >-
-          python src/wait_for_thunderstore.py
+          python .github/scripts/wait_for_thunderstore.py
           --owner "$PACKAGE_OWNER"
           --name "$PACKAGE_NAME"
           --version "$PACKAGE_VERSION"
