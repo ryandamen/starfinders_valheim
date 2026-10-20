@@ -1,8 +1,9 @@
+"""Wait until a package version is active in the Thunderstore feed."""
+
 import json
 import os
 import time
 import urllib.request
-
 
 FEED_URL = "https://thunderstore.io/c/valheim/api/v1/package/"
 INTERVAL_SECONDS = 5 * 60
