@@ -1,0 +1,52 @@
+name: Publish mod and restart server
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  publish:
+    name: Publish package
+    uses: ./.github/workflows/publish-package.yml
+    with:
+      package_version: ${{ github.ref_name }}
+    secrets:
+      thunderstore_api_token: ${{ secrets.THUNDERSTORE_API_TOKEN }}
+
+  wait-for-thunderstore:
+    name: Wait for Thunderstore
+    needs: publish
+    uses: ./.github/workflows/wait-for-thunderstore.yml
+    with:
+      package_version: ${{ github.ref_name }}
+
+  update-server:
+    name: Update Valheim server
+    needs: wait-for-thunderstore
+    uses: ./.github/workflows/update-valheim-server.yml
+    with:
+      package_version: ${{ github.ref_name }}
+    secrets:
+      tcadmin_panel_url: ${{ secrets.TCADMIN_PANEL_URL }}
+      tcadmin_api_key: ${{ secrets.TCADMIN_API_KEY }}
+      tcadmin_service_id: ${{ secrets.TCADMIN_SERVICE_ID }}
+      discordbot_awl_webhook_url: ${{ secrets.DISCORDBOT_AWL_WEBHOOK_URL }}
+
+  notify-server-online:
+    name: Notify Discord that the server is online
+    needs: update-server
+    uses: ./.github/workflows/notify-server-online.yml
+    with:
+      package_version: ${{ github.ref_name }}
+    secrets:
+      discord_webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
+  release:
+    name: Create GitHub release
+    needs: update-server
+    permissions:
+      contents: write
+    uses: ./.github/workflows/create-release.yml
+    with:
+      package_version: ${{ github.ref_name }}

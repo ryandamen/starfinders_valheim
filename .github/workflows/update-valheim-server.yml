@@ -1,0 +1,37 @@
+name: Update Valheim server
+
+on:
+  workflow_call:
+    inputs:
+      package_version:
+        required: true
+        type: string
+    secrets:
+      tcadmin_panel_url:
+        required: true
+      tcadmin_api_key:
+        required: true
+      tcadmin_service_id:
+        required: true
+      discordbot_awl_webhook_url:
+        required: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Update Valheim server
+        env:
+          PACKAGE_VERSION: ${{ inputs.package_version }}
+          TCADMIN_PANEL_URL: ${{ secrets.tcadmin_panel_url }}
+          TCADMIN_API_KEY: ${{ secrets.tcadmin_api_key }}
+          TCADMIN_SERVICE_ID: ${{ secrets.tcadmin_service_id }}
+          TCADMIN_SCRIPT_ID: "72"
+          TCADMIN_MOD_ID: "4"
+          DISCORDBOT_AWL_WEBHOOK_URL: ${{ secrets.discordbot_awl_webhook_url }}
+        run: >-
+          python .github/scripts/update_valheim_server.py
+          --version "$PACKAGE_VERSION"

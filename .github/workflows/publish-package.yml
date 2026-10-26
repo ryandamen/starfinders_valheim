@@ -1,9 +1,14 @@
-name: Publish ThunderStore release
+name: Publish Thunderstore package
 
 on:
-  push:
-    tags:
-      - '*'
+  workflow_call:
+    inputs:
+      package_version:
+        required: true
+        type: string
+    secrets:
+      thunderstore_api_token:
+        required: true
 
 jobs:
   publish:
@@ -13,15 +18,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Publish to ThunderStore
-        id: publish
         uses: GreenTF/upload-thunderstore-package@v4.3
         with:
-          token: ${{ secrets.THUNDERSTORE_API_TOKEN }}
+          token: ${{ secrets.thunderstore_api_token }}
           community: valheim
           namespace: Starfinders
           name: starfinders_modpack
           description: Modpack for the Starfinders private Valheim server
-          version: ${{ github.ref_name }}
+          version: ${{ inputs.package_version }}
           repo: https://thunderstore.io
           path: .
           deps: |
@@ -29,6 +33,7 @@ jobs:
             ValheimModding-Jotunn@2.30.2
             ValheimModding-JsonDotNET@13.0.4
             ValheimModding-YamlDotNet@16.3.1
+            AWLGaming-DiscordBot_AWL@1.4.10
             shudnal-ConditionalConfigSync@1.0.11
             Advize-PlantEverything@1.21.4
             ishid4-BetterArchery@2.0.5
@@ -50,36 +55,3 @@ jobs:
           categories: |
             modpacks
             deep-north-update
-
-      - name: Wait for Thunderstore availability
-        env:
-          PACKAGE_OWNER: Starfinders
-          PACKAGE_NAME: starfinders_modpack
-          PACKAGE_VERSION: ${{ github.ref_name }}
-        run: >-
-          python .github/scripts/wait_for_thunderstore.py
-          --owner "$PACKAGE_OWNER"
-          --name "$PACKAGE_NAME"
-          --version "$PACKAGE_VERSION"
-          --interval-minutes 10
-          --max-checks 50
-
-      - name: Create GitHub Release
-        if: success()
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          generate_release_notes: true
-
-      - name: Notify Discord
-        uses: Ilshidur/action-discord@ad5235de713df3ef38022185499b02ffe93b7efe
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          PACKAGE_VERSION: ${{ github.ref_name }}
-          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}
-        with:
-          args: |
-            **Starfinders modpack {{ PACKAGE_VERSION }} is now available!**
-            Install it from Thunderstore: https://thunderstore.io/c/valheim/p/Starfinders/starfinders_modpack/
-            GitHub release: {{ RELEASE_URL }}

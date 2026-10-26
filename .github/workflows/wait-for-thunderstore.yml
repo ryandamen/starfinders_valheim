@@ -1,0 +1,28 @@
+name: Wait for Thunderstore availability
+
+on:
+  workflow_call:
+    inputs:
+      package_version:
+        required: true
+        type: string
+
+jobs:
+  wait:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Wait for Thunderstore availability
+        env:
+          PACKAGE_OWNER: Starfinders
+          PACKAGE_NAME: starfinders_modpack
+          PACKAGE_VERSION: ${{ inputs.package_version }}
+        run: >-
+          python .github/scripts/wait_for_thunderstore.py
+          --owner "$PACKAGE_OWNER"
+          --name "$PACKAGE_NAME"
+          --version "$PACKAGE_VERSION"
+          --interval-minutes 10
+          --max-checks 50

@@ -1,0 +1,25 @@
+name: Notify Discord that the Valheim server is online
+
+on:
+  workflow_call:
+    inputs:
+      package_version:
+        required: true
+        type: string
+    secrets:
+      discord_webhook_url:
+        required: true
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Discord that the server is back online
+        uses: Ilshidur/action-discord@ad5235de713df3ef38022185499b02ffe93b7efe
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.discord_webhook_url }}
+          PACKAGE_VERSION: ${{ inputs.package_version }}
+        with:
+          args: |
+            **The Starfinders Valheim server is back online with modpack {{ PACKAGE_VERSION }}!**
+            Update the [modpack](https://thunderstore.io/c/valheim/p/Starfinders/starfinders_modpack/) before joining the server again.
