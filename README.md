@@ -6,26 +6,38 @@ Modpack for the Starfinders private Valheim server.
 ### GitHub secret
 
 - `THUNDERSTORE_API_TOKEN` your ThunderStore API token
-- `DISCORD_WEBHOOK_URL` your discord bots webhook url
+- `DISCORD_WEBHOOK_URL` the Discord webhook for completion/online notices
+- `DISCORDBOT_AWL_WEBHOOK_URL` the AWL command-channel webhook used for
+  restart countdown and save messages
+- `TCADMIN_API_KEY` a TCAdmin API key with permission to read, stop, and start
+  this service
+- `TCADMIN_SERVICE_ID` the numeric TCAdmin service ID for the Valheim server
+- `SFTP_USERNAME` the username for the SFTP account
+- `SFTP_PASSWORD` the password for the SFTP account
+- `SFTP_KNOWN_HOSTS` a verified OpenSSH `known_hosts` entry for the SFTP
+  server, including its non-default port
+
+`SFTP_KNOWN_HOSTS` SFTP server's verified host key/
+the output format from `ssh-keyscan -p 8822 23.111.240.210`.
 
 ### Configuration
 
-The dependancies for the mods are declared in the `Publish to ThunderStore` step's `deps` input. The format for adding mods is:
+Declare direct mod dependencies and their exact versions under
+`[package.dependencies]` in `thunderstore.toml`.
 
-```bash
-<creator>-<mod_name>@<version>
+Running the deployment script directly performs a live package transfer and
+server restart. Use it only when the restart is intended and all required
+environment values are configured.
 
-# Example:
-denikson-BepInExPack_Valheim@5.4.2351
+```powershell
+python .github/scripts/update_valheim_server.py --version 0.0.1
 ```
-
-This action replaces the dependency list in `thunderstore.toml` so that one can be ignored.
 
 ## Initiating the workflow
 Create a version tag and push it:
 
 ```bash
-VERSION=3.2.3
+VERSION=4.0.0
 git tag $VERSION && git push origin $VERSION
 ```
 
@@ -33,15 +45,22 @@ The workflow uses the tag name as the package version, so `2.0.1` becomes the Th
 
 ## Workflow
 
-The workflow runs on GitHub Actions whenever a tag is pushed. The tag name is used as
-the package version.
+See the [deployment workflow diagram](docs/workflow.mmd)
 
-Pipeline steps:
 
-1. **Check out the repository** so the workflow can package its contents.
-2. **Build the package and publish to Thunderstore website** uses the
-   `THUNDERSTORE_API_TOKEN` secret to push to our team.
-5. **Wait for availability in Thunderstore.**  There is a delay between the package appearing on the website and the app so it checks the Valheim Thunderstore package feed every 5 minutes (max 4 hours) until the version is available in the Tunderstore app.
-6. **Create a GitHub Release** from the tag.
-7. **Notify Discord** that the package is available, with links to the Thunderstore package and GitHub Release. This step uses the `DISCORD_WEBHOOK_URL` secret to send the message to Discord.
+### DiscordBot_AWL configuration
 
+1. In Discord Developer Portal, enable the bot's **Message Content Intent**.
+   Keep its token on the Valheim server only; the GitHub workflow does not use
+   the bot token.
+2. Create or choose the Discord channel where AWL reads commands. Enable
+   Developer Mode in Discord and copy that channel's numeric ID.
+3. In `BepInEx/config/RustyMods.DiscordBot.cfg`, configure:
+   - `[4 - Commands] Channel ID` to the chosen channel ID.
+   - `[4 - Commands] Discord Admin` to include `OnlyMods`.
+   - `[5 - Setup] BOT TOKEN` with the server's Discord bot token.
+4. Give the AWL bot permission to view the channel and read its message history.
+5. If you want to send AWL commands through a webhook, create one in its
+   configured command channel and confirm the webhook identity is authorized
+   in the plugin configuration. The update workflow uses
+   `DISCORDBOT_AWL_WEBHOOK_URL` for countdown, save, and restart messages.

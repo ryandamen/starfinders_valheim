@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "starfinders-valheim-deployment"
+version = "0.1.0"
+description = "CI scripts for deploying Valheim Thunderstore mods"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.32,<3",
+    "paramiko>=3.5,<5",
+]
+
+[tool.setuptools]
+py-modules = ["thunderstore_deployment", "update_valheim_server"]
+package-dir = {"" = ".github/scripts"}

@@ -7,13 +7,17 @@ on:
         required: true
         type: string
     secrets:
-      tcadmin_panel_url:
-        required: true
       tcadmin_api_key:
         required: true
       tcadmin_service_id:
         required: true
       discordbot_awl_webhook_url:
+        required: true
+      sftp_username:
+        required: true
+      sftp_password:
+        required: true
+      sftp_known_hosts:
         required: true
 
 jobs:
@@ -23,15 +27,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Update Valheim server
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deployment dependencies
+        run: python -m pip install .
+
+      - name: Deploy modpack and restart Valheim server
         env:
           PACKAGE_VERSION: ${{ inputs.package_version }}
-          TCADMIN_PANEL_URL: ${{ secrets.tcadmin_panel_url }}
+          TCADMIN_PANEL_URL: https://gamepanel.gtxgaming.co.uk
           TCADMIN_API_KEY: ${{ secrets.tcadmin_api_key }}
           TCADMIN_SERVICE_ID: ${{ secrets.tcadmin_service_id }}
-          TCADMIN_SCRIPT_ID: "72"
-          TCADMIN_MOD_ID: "4"
           DISCORDBOT_AWL_WEBHOOK_URL: ${{ secrets.discordbot_awl_webhook_url }}
+          SFTP_HOST: 23.111.240.210
+          SFTP_PORT: "8822"
+          SFTP_USERNAME: ${{ secrets.sftp_username }}
+          SFTP_PASSWORD: ${{ secrets.sftp_password }}
+          SFTP_KNOWN_HOSTS: ${{ secrets.sftp_known_hosts }}
+          SFTP_REMOTE_PATH: /23.111.240.210_5914/BepInEx/plugins
         run: >-
           python .github/scripts/update_valheim_server.py
           --version "$PACKAGE_VERSION"

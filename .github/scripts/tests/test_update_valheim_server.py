@@ -1,16 +1,115 @@
-import json
+import os
 import sys
+import threading
 import unittest
-from types import SimpleNamespace
+from contextlib import redirect_stderr
+from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import update_valheim_server as updater
+from thunderstore_deployment import StagedDeployment
+
+
+class ArgumentParsingTests(unittest.TestCase):
+    def test_check_connection_mode_is_not_available(self):
+        with (
+            mock.patch.object(Path, "is_file", return_value=False),
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(
+                sys,
+                "argv",
+                [
+                    "update_valheim_server.py",
+                    "--version",
+                    "1.2.3",
+                    "--check-connection",
+                ],
+            ),
+            redirect_stderr(StringIO()) as error_output,
+        ):
+            with self.assertRaises(SystemExit) as error:
+                updater.parse_args()
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn(
+            "unrecognized arguments: --check-connection",
+            error_output.getvalue(),
+        )
+
+    def test_invocation_requires_version(self):
+        with (
+            mock.patch.object(Path, "is_file", return_value=False),
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(
+                sys,
+                "argv",
+                ["update_valheim_server.py"],
+            ),
+            redirect_stderr(StringIO()) as error_output,
+        ):
+            with self.assertRaises(SystemExit) as error:
+                updater.parse_args()
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn("--version is required", error_output.getvalue())
+
+    def test_dry_run_is_not_supported(self):
+        with (
+            mock.patch.object(Path, "is_file", return_value=False),
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(
+                sys,
+                "argv",
+                [
+                    "update_valheim_server.py",
+                    "--version",
+                    "1.2.3",
+                    "--dry-run",
+                ],
+            ),
+            redirect_stderr(StringIO()) as error_output,
+        ):
+            with self.assertRaises(SystemExit) as error:
+                updater.parse_args()
+
+        self.assertEqual(error.exception.code, 2)
+        self.assertIn(
+            "unrecognized arguments: --dry-run",
+            error_output.getvalue(),
+        )
+
+    def test_configured_invocation_needs_no_execution_flag(self):
+        config = {
+            "TCADMIN_API_KEY": "key",
+            "TCADMIN_SERVICE_ID": "123",
+            "DISCORDBOT_AWL_WEBHOOK_URL": "https://discord.com/api/webhooks/1/token",
+            "SFTP_HOST": "sftp.example.com",
+            "SFTP_USERNAME": "user",
+            "SFTP_PASSWORD": "password",
+            "SFTP_KNOWN_HOSTS": "[sftp.example.com]:8822 ssh-ed25519 key",
+            "SFTP_REMOTE_PATH": "/server/BepInEx/plugins",
+            "SFTP_PORT": "8822",
+        }
+        with (
+            mock.patch.object(Path, "is_file", return_value=False),
+            mock.patch.dict(os.environ, config, clear=True),
+            mock.patch.object(
+                sys,
+                "argv",
+                ["update_valheim_server.py", "--version", "1.2.3"],
+            ),
+        ):
+            args = updater.parse_args()
+
+        self.assertEqual(args.version, "1.2.3")
+        self.assertEqual(args.sftp_port, 8822)
 
 
 class TcAdminTests(unittest.TestCase):
-    def test_requires_https_numeric_service_and_script_ids(self):
+    def test_requires_https_and_numeric_service_id(self):
         with self.assertRaisesRegex(ValueError, "HTTPS"):
             updater.TcAdminClient("http://panel.example", "key", "123")
         with self.assertRaisesRegex(ValueError, "numeric"):
@@ -20,127 +119,168 @@ class TcAdminTests(unittest.TestCase):
                 "not-a-number",
             )
 
+    def test_service_status_uses_configured_api_key_header(self):
+        response = mock.Mock()
+        response.json.return_value = {
+            "Success": True,
+            "Result": {"ServiceStatus": 4},
+        }
+        response.raise_for_status.return_value = None
         client = updater.TcAdminClient(
             "https://panel.example",
-            "secret-key",
+            "secret",
+            "123",
+            api_key_header="X-Api-Key",
+        )
+        with mock.patch.object(
+            updater.requests,
+            "get",
+            return_value=response,
+        ) as get:
+            self.assertEqual(client.service_status(), 4)
+
+        self.assertEqual(
+            get.call_args.kwargs["headers"]["X-Api-Key"],
+            "secret",
+        )
+        self.assertEqual(
+            get.call_args.args[0],
+            "https://panel.example/api/service/123",
+        )
+
+    def test_stop_and_start_use_tcadmin_service_endpoints(self):
+        client = updater.TcAdminClient(
+            "https://panel.example",
+            "secret",
             "123",
         )
-        with self.assertRaisesRegex(ValueError, "numeric"):
-            client.run_mod_update_script("script", "4")
+        client._request = mock.Mock()
 
-    def test_mod_update_script_uses_tcadmin_custom_script_api(self):
+        client.stop_service()
+        client.start_service()
+
+        self.assertEqual(
+            client._request.call_args_list,
+            [
+                mock.call(
+                    "POST",
+                    "/api/service/123/stop",
+                    fields={"reason": "Starfinders modpack update"},
+                ),
+                mock.call(
+                    "POST",
+                    "/api/service/123/start",
+                    fields={"reason": "Starfinders modpack update"},
+                ),
+            ],
+        )
+
+    def test_failed_api_response_is_reported(self):
+        response = mock.Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "Success": False,
+            "Message": "denied",
+        }
         client = updater.TcAdminClient(
             "https://panel.example",
-            "secret-key",
-            "5635104",
+            "secret",
+            "123",
         )
-        client._request = mock.Mock(return_value={"RunNow": True})
+        with (
+            mock.patch.object(
+                updater.requests,
+                "get",
+                return_value=response,
+            ),
+            self.assertRaisesRegex(RuntimeError, "denied"),
+        ):
+            client.service_status()
 
-        client.run_mod_update_script("72", "4")
 
-        client._request.assert_called_once_with(
-            "POST",
-            "/api/service/5635104/Script/72",
-            fields={
-                "variables": "{}",
-                "runNow": "true",
-                "modId": "4",
-                "isGlobal": "false",
-            },
-            timeout=updater.SCRIPT_TIMEOUT_SECONDS,
-        )
-
-    def test_mod_update_script_fails_if_not_confirmed_immediate(self):
-        client = updater.TcAdminClient(
-            "https://panel.example",
-            "secret-key",
-            "5635104",
-        )
-        client._request = mock.Mock(return_value={"RunNow": False})
-
-        with self.assertRaisesRegex(RuntimeError, "immediate execution"):
-            client.run_mod_update_script("72", "4")
-
-    def test_tcadmin_api_uses_api_key_and_validates_response(self):
-        class FakeResponse:
-            status = 200
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-            def read(self):
-                return b'{"Success": true, "Result": {"RunNow": true}}'
-
-        client = updater.TcAdminClient(
-            "https://panel.example",
-            "secret-key",
-            "5635104",
-        )
-        with mock.patch.object(
-            updater.urllib.request,
-            "urlopen",
-            return_value=FakeResponse(),
-        ) as urlopen:
-            result = client._request(
-                "POST",
-                "/api/service/5635104/Script/72",
-                fields={
-                    "variables": "{}",
-                    "runNow": "true",
-                    "modId": "4",
-                    "isGlobal": "false",
-                },
+class CountdownTests(unittest.TestCase):
+    def test_preserves_existing_warning_minutes(self):
+        messages = []
+        with (
+            mock.patch.object(
+                updater,
+                "send_game_message",
+                side_effect=lambda webhook, message: messages.append(message),
+            ),
+            mock.patch.object(
+                updater,
+                "_wait_for_countdown_delay",
+                return_value=True,
+            ) as wait_for_delay,
+        ):
+            result = updater.send_countdown(
+                "https://discord.com/api/webhooks/example/token",
+                "1.2.3",
+                threading.Event(),
             )
 
-        request = urlopen.call_args.args[0]
-        self.assertEqual(request.get_header("Api_key"), "secret-key")
-        self.assertIn(b'name="runNow"\r\n\r\ntrue', request.data)
-        self.assertEqual(result, {"RunNow": True})
+        self.assertTrue(result)
+        self.assertEqual(
+            [
+                "15 minutes",
+                "10 minutes",
+                "5 minutes",
+                "3 minutes",
+                "2 minutes",
+                "1 minute",
+            ],
+            [message.split("restart in ", 1)[1].split(" to install", 1)[0]
+             for message in messages],
+        )
+        self.assertEqual(wait_for_delay.call_count, 6)
 
-    def test_awl_webhook_uses_configured_identity_and_disables_mentions(self):
-        class FakeResponse:
-            status = 204
+    def test_package_preparation_and_countdown_run_concurrently(self):
+        args = SimpleNamespace(
+            version="1.2.3",
+            discordbot_awl_webhook_url="https://discord.com/webhook",
+        )
+        barrier = threading.Barrier(2)
+        staged = StagedDeployment("/stage", ("Example/plugin.dll",))
 
-            def __enter__(self):
-                return self
+        def prepare(_args, _cancel_event):
+            barrier.wait(timeout=2)
+            return staged
 
-            def __exit__(self, *args):
-                return False
+        def countdown(_webhook, _version, _cancel_event):
+            barrier.wait(timeout=2)
+            return True
 
-        with mock.patch.object(
-            updater.urllib.request,
-            "urlopen",
-            return_value=FakeResponse(),
-        ) as urlopen:
-            updater.webhook_message(
-                "https://discord.com/api/webhooks/123/key",
-                "!message Maintenance notice",
-            )
+        with (
+            mock.patch.object(updater, "_stage_packages", side_effect=prepare),
+            mock.patch.object(updater, "send_countdown", side_effect=countdown),
+        ):
+            result = updater._prepare_update(args, threading.Event())
 
-        request = urlopen.call_args.args[0]
-        payload = json.loads(request.data)
-        self.assertEqual(payload["username"], updater.AWL_WEBHOOK_USERNAME)
-        self.assertEqual(payload["content"], "!message Maintenance notice")
-        self.assertEqual(payload["allowed_mentions"], {"parse": []})
+        self.assertEqual(result, staged)
 
 
 class UpdateSequenceTests(unittest.TestCase):
     def setUp(self):
         self.args = SimpleNamespace(
-            version="3.2.3",
+            version="1.2.3",
+            discordbot_awl_webhook_url=(
+                "https://discord.com/api/webhooks/example/token"
+            ),
             tcadmin_panel_url="https://panel.example",
             tcadmin_api_key="secret",
+            tcadmin_api_key_header="api_key",
             tcadmin_service_id="5635104",
-            tcadmin_script_id="72",
-            tcadmin_mod_id="4",
-            discordbot_awl_webhook_url="https://discord.com/api/webhooks/123/key",
+            sftp_host="server.example",
+            sftp_port=8822,
+            sftp_username="user",
+            sftp_password="password",
+            sftp_known_hosts="[server.example]:8822 ssh-ed25519 key",
+            sftp_remote_path="/server/BepInEx/plugins",
         )
 
-    def test_update_stops_runs_mod_updater_and_starts_in_order(self):
+    def test_server_restarts_only_after_countdown_and_staging(self):
         calls = []
+        staged = StagedDeployment("/stage", ("Example/plugin.dll",))
 
         class FakeClient:
             def __init__(self, *args):
@@ -156,9 +296,6 @@ class UpdateSequenceTests(unittest.TestCase):
             def wait_for_status(self, status):
                 calls.append(f"wait-{status}")
 
-            def run_mod_update_script(self, script_id, mod_id):
-                calls.append(f"update-{script_id}-{mod_id}")
-
             def start_service(self):
                 calls.append("start")
 
@@ -166,13 +303,23 @@ class UpdateSequenceTests(unittest.TestCase):
             mock.patch.object(updater, "TcAdminClient", FakeClient),
             mock.patch.object(
                 updater,
-                "send_countdown",
-                side_effect=lambda *args: calls.append("countdown"),
+                "_prepare_update",
+                side_effect=lambda *_: calls.append("prepare") or staged,
+            ),
+            mock.patch.object(
+                updater,
+                "announce_restart_and_save",
+                side_effect=lambda *_: calls.append("save"),
+            ),
+            mock.patch.object(
+                updater,
+                "promote_staged_deployment",
+                side_effect=lambda *_: calls.append("promote"),
             ),
             mock.patch.object(
                 updater,
                 "send_game_message",
-                side_effect=lambda *args: calls.append("online-message"),
+                side_effect=lambda *_: calls.append("online"),
             ),
         ):
             updater.update_server(self.args)
@@ -182,18 +329,51 @@ class UpdateSequenceTests(unittest.TestCase):
             [
                 "client",
                 "status",
-                "countdown",
+                "prepare",
+                "save",
                 "stop",
                 "wait-1",
-                "update-72-4",
+                "promote",
                 "start",
                 "wait-4",
-                "online-message",
+                "online",
             ],
         )
 
-    def test_failed_mod_update_does_not_restart_service(self):
+    def test_preparation_failure_leaves_server_running(self):
         calls = []
+
+        class FakeClient:
+            def __init__(self, *args):
+                pass
+
+            def service_status(self):
+                return 4
+
+            def stop_service(self):
+                calls.append("stop")
+
+        with (
+            mock.patch.object(updater, "TcAdminClient", FakeClient),
+            mock.patch.object(
+                updater,
+                "_prepare_update",
+                side_effect=RuntimeError("download failed"),
+            ),
+            mock.patch.object(
+                updater,
+                "send_game_message",
+                side_effect=lambda *_: calls.append("failure-notice"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "download failed"),
+        ):
+            updater.update_server(self.args)
+
+        self.assertEqual(calls, ["failure-notice"])
+
+    def test_promotion_failure_does_not_start_server(self):
+        calls = []
+        staged = StagedDeployment("/stage", ("Example/plugin.dll",))
 
         class FakeClient:
             def __init__(self, *args):
@@ -208,52 +388,23 @@ class UpdateSequenceTests(unittest.TestCase):
             def wait_for_status(self, status):
                 calls.append(f"wait-{status}")
 
-            def run_mod_update_script(self, script_id, mod_id):
-                calls.append("update")
-                raise RuntimeError("mod update failed")
-
             def start_service(self):
                 calls.append("start")
 
         with (
             mock.patch.object(updater, "TcAdminClient", FakeClient),
-            mock.patch.object(updater, "send_countdown"),
+            mock.patch.object(updater, "_prepare_update", return_value=staged),
+            mock.patch.object(updater, "announce_restart_and_save"),
+            mock.patch.object(
+                updater,
+                "promote_staged_deployment",
+                side_effect=RuntimeError("promotion failed"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "promotion failed"),
         ):
-            with self.assertLogs(updater.logger, level="ERROR") as captured:
-                with self.assertRaisesRegex(RuntimeError, "mod update failed"):
-                    updater.update_server(self.args)
+            updater.update_server(self.args)
 
-        self.assertEqual(calls, ["stop", "wait-1", "update"])
-        self.assertIn("may remain stopped", captured.output[-1])
-
-    def test_countdown_uses_requested_offsets_and_save_delay(self):
-        with (
-            mock.patch.object(updater.time, "sleep") as sleep,
-            mock.patch.object(updater, "webhook_message") as command,
-        ):
-            updater.send_countdown(
-                self.args.discordbot_awl_webhook_url,
-                self.args.version,
-            )
-
-        self.assertEqual(
-            [call.args[0] for call in sleep.call_args_list],
-            [*updater.NOTICE_DELAYS_SECONDS, updater.SAVE_SETTLE_SECONDS],
-        )
-        self.assertEqual(command.call_count, 8)
-        self.assertEqual(
-            [call.args[1] for call in command.call_args_list],
-            [
-                "!message The server will restart in 15 minutes to install modpack 3.2.3.",
-                "!message The server will restart in 10 minutes to install modpack 3.2.3.",
-                "!message The server will restart in 5 minutes to install modpack 3.2.3.",
-                "!message The server will restart in 3 minutes to install modpack 3.2.3.",
-                "!message The server will restart in 2 minutes to install modpack 3.2.3.",
-                "!message The server will restart in 1 minute to install modpack 3.2.3.",
-                "!message The server is restarting now to install modpack 3.2.3.",
-                "!save",
-            ],
-        )
+        self.assertEqual(calls, ["stop", "wait-1"])
 
 
 if __name__ == "__main__":

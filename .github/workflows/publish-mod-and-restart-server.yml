@@ -1,4 +1,4 @@
-name: Publish mod and restart server
+name: Publish modpack and update server mods
 
 on:
   push:
@@ -22,16 +22,27 @@ jobs:
       package_version: ${{ github.ref_name }}
 
   update-server:
-    name: Update Valheim server
+    name: Stage mods and restart Valheim server
     needs: wait-for-thunderstore
     uses: ./.github/workflows/update-valheim-server.yml
     with:
       package_version: ${{ github.ref_name }}
     secrets:
-      tcadmin_panel_url: ${{ secrets.TCADMIN_PANEL_URL }}
       tcadmin_api_key: ${{ secrets.TCADMIN_API_KEY }}
       tcadmin_service_id: ${{ secrets.TCADMIN_SERVICE_ID }}
       discordbot_awl_webhook_url: ${{ secrets.DISCORDBOT_AWL_WEBHOOK_URL }}
+      sftp_username: ${{ secrets.SFTP_USERNAME }}
+      sftp_password: ${{ secrets.SFTP_PASSWORD }}
+      sftp_known_hosts: ${{ secrets.SFTP_KNOWN_HOSTS }}
+
+  notify-modpack-update:
+    name: Notify Discord that the modpack update completed
+    needs: update-server
+    uses: ./.github/workflows/notify-modpack-update.yml
+    with:
+      package_version: ${{ github.ref_name }}
+    secrets:
+      discord_webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
 
   notify-server-online:
     name: Notify Discord that the server is online

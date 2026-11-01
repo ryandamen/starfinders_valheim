@@ -1,0 +1,47 @@
+flowchart TD
+    tag["Push version tag"]
+    publish["publish-package.yml<br/>Read dependencies from thunderstore.toml<br/>Publish modpack to Thunderstore"]
+    wait["wait-for-thunderstore.yml<br/>Check listing every minute<br/>Up to 500 checks"]
+    listed{"Exact version listed<br/>on Thunderstore?"}
+    failListing["Wait workflow fails<br/>No server update starts"]
+
+    subgraph deploy["update-valheim-server.yml"]
+        start["Install Python project dependencies<br/>Start deployment script"]
+        parallel{"Run in parallel"}
+        countdown["Send restart warnings<br/>15, 10, 5, 3, 2, 1 minutes"]
+        packages["Resolve pinned mods and transitive dependencies<br/>Download archives and extract plugin files"]
+        staged["Upload files to temporary SFTP staging directory"]
+        ready{"Countdown and staging<br/>both successful?"}
+        cancel["Cancel restart<br/>Leave server running"]
+        save["Send AWL save/restart message<br/>Wait for save to settle"]
+        stop["Stop Valheim service via TCAdmin<br/>Wait until stopped"]
+        promote["Promote staged plugin files<br/>to BepInEx/plugins over SFTP"]
+        launch["Start service via TCAdmin<br/>Wait until running"]
+        awlOnline["Send AWL server-online message"]
+        failAfterStop["Report deployment failure<br/>Server may need manual recovery"]
+
+        start --> parallel
+        parallel --> countdown
+        parallel --> packages
+        packages --> staged
+        countdown --> ready
+        staged --> ready
+        ready -->|No| cancel
+        ready -->|Yes| save
+        save --> stop --> promote --> launch --> awlOnline
+        stop -. "failure after stop requested" .-> failAfterStop
+        promote -. "failure" .-> failAfterStop
+        launch -. "failure" .-> failAfterStop
+    end
+
+    tag --> publish --> wait --> listed
+    listed -->|No, retry until timeout| wait
+    listed -->|No, timeout| failListing
+    listed -->|Yes| start
+
+    complete["notify-modpack-update.yml<br/>Post update-complete notice to Discord"]
+    online["notify-server-online.yml<br/>Post server-online notice to Discord"]
+    release["create-release.yml<br/>Create GitHub release"]
+    awlOnline --> complete
+    awlOnline --> online
+    awlOnline --> release

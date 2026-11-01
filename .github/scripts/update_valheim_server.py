@@ -1,21 +1,31 @@
-"""Run GTXGaming's configured mod-update script through the TCAdmin API."""
+"""Deploy Thunderstore plugin files, then safely restart the Valheim server."""
 
 import argparse
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 import json
 import logging
 import os
+from pathlib import Path
+import re
+import threading
 import time
 import urllib.error
 import urllib.parse
-import urllib.request
-import uuid
+
+import paramiko
+import requests
+
+from thunderstore_deployment import (
+    deploy_to_sftp,
+    discard_staged_deployment,
+    promote_staged_deployment,
+)
 
 REQUEST_TIMEOUT_SECONDS = 60
-SCRIPT_TIMEOUT_SECONDS = 30 * 60
 STATUS_POLL_SECONDS = 10
 STATUS_TIMEOUT_SECONDS = 300
 NOTICE_DELAYS_SECONDS = (5 * 60, 5 * 60, 2 * 60, 60, 60, 60)
-NOTICE_MINUTES = (15, 10, 5, 3, 2, 1, 0)
+NOTICE_MINUTES = (15, 10, 5, 3, 2, 1)
 AWL_WEBHOOK_USERNAME = "OnlyMods"
 SAVE_SETTLE_SECONDS = 30
 
@@ -24,6 +34,166 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s",
 )
 logger = logging.getLogger(__name__)
+OPERATION_ERRORS = (
+    OSError,
+    EOFError,
+    RuntimeError,
+    TimeoutError,
+    ValueError,
+    requests.RequestException,
+    paramiko.SFTPError,
+    paramiko.SSHException,
+    urllib.error.URLError,
+)
+
+
+def positive_integer(value):
+    try:
+        number = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be a whole number") from error
+    if number <= 0:
+        raise argparse.ArgumentTypeError("must be greater than zero")
+    return number
+
+
+def read_env_file(path):
+    values = {}
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise ValueError(f"Could not read env file {path}: {error}") from error
+
+    for line_number, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("export "):
+            stripped = stripped[len("export ") :].lstrip()
+        key, separator, raw_value = stripped.partition("=")
+        if not separator or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            raise ValueError(
+                f"Invalid .env entry at {path}:{line_number}; "
+                "expected KEY=VALUE"
+            )
+
+        raw_value = raw_value.strip()
+        if raw_value.startswith(("'", '"')):
+            quote = raw_value[0]
+            closing_quote = raw_value.find(quote, 1)
+            if closing_quote == -1:
+                raise ValueError(
+                    f"Invalid quoted value at {path}:{line_number}"
+                )
+            remainder = raw_value[closing_quote + 1 :].strip()
+            if remainder and not remainder.startswith("#"):
+                raise ValueError(
+                    f"Invalid quoted value at {path}:{line_number}"
+                )
+            value = raw_value[1:closing_quote]
+        else:
+            value = raw_value.split("#", maxsplit=1)[0].strip()
+        values[key] = value
+    return values
+
+
+def _environment_value(env_file_values, *keys):
+    for key in keys:
+        if key in os.environ:
+            return os.environ[key]
+        if key in env_file_values:
+            return env_file_values[key]
+    return None
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Download Thunderstore modpack dependencies, stage them over "
+            "SFTP, and restart the Valheim server."
+        )
+    )
+    parser.add_argument("--version")
+    parser.add_argument(
+        "--env-file",
+        help="Local KEY=VALUE file (automatically reads .env when present).",
+    )
+    preliminary_args, _ = parser.parse_known_args()
+    env_file_path = preliminary_args.env_file
+    if env_file_path is None and Path(".env").is_file():
+        env_file_path = ".env"
+    try:
+        env_file_values = (
+            read_env_file(env_file_path) if env_file_path is not None else {}
+        )
+    except ValueError as error:
+        parser.error(str(error))
+
+    parser.set_defaults(
+        tcadmin_panel_url=(
+            _environment_value(
+                env_file_values,
+                "GTX_API_BASE_URL",
+                "TCADMIN_PANEL_URL",
+            )
+            or "https://gamepanel.gtxgaming.co.uk"
+        ),
+        tcadmin_api_key=_environment_value(
+            env_file_values,
+            "GTX_API_KEY",
+            "TCADMIN_API_KEY",
+        ),
+        tcadmin_api_key_header=(
+            _environment_value(env_file_values, "GTX_API_KEY_HEADER")
+            or "api_key"
+        ),
+        tcadmin_service_id=_environment_value(
+            env_file_values,
+            "TCADMIN_SERVICE_ID",
+        ),
+        discordbot_awl_webhook_url=_environment_value(
+            env_file_values,
+            "DISCORDBOT_AWL_WEBHOOK_URL",
+        ),
+        sftp_host=_environment_value(env_file_values, "SFTP_HOST"),
+        sftp_port=_environment_value(env_file_values, "SFTP_PORT") or "22",
+        sftp_username=_environment_value(env_file_values, "SFTP_USERNAME"),
+        sftp_password=_environment_value(env_file_values, "SFTP_PASSWORD"),
+        sftp_known_hosts=_environment_value(env_file_values, "SFTP_KNOWN_HOSTS"),
+        sftp_remote_path=_environment_value(env_file_values, "SFTP_REMOTE_PATH"),
+    )
+    args = parser.parse_args()
+
+    if not args.version:
+        parser.error("--version is required")
+
+    missing = []
+    if not args.tcadmin_api_key:
+        missing.append("TCADMIN_API_KEY")
+    if not args.tcadmin_service_id:
+        missing.append("TCADMIN_SERVICE_ID")
+    required_sftp = {
+        "SFTP_HOST": args.sftp_host,
+        "SFTP_USERNAME": args.sftp_username,
+        "SFTP_PASSWORD": args.sftp_password,
+        "SFTP_KNOWN_HOSTS": args.sftp_known_hosts,
+        "SFTP_REMOTE_PATH": args.sftp_remote_path,
+        "DISCORDBOT_AWL_WEBHOOK_URL": (
+            args.discordbot_awl_webhook_url
+        ),
+    }
+    missing.extend(
+        key for key, value in required_sftp.items() if not value
+    )
+    if missing:
+        parser.error("missing required configuration: " + ", ".join(missing))
+    try:
+        args.sftp_port = positive_integer(args.sftp_port)
+    except argparse.ArgumentTypeError as error:
+        parser.error(f"SFTP_PORT {error}")
+    if args.sftp_port > 65535:
+        parser.error("SFTP_PORT must be between 1 and 65535")
+    return args
 
 
 def validate_webhook_url(webhook_url):
@@ -45,41 +215,45 @@ def webhook_message(webhook_url, content):
             "username": AWL_WEBHOOK_USERNAME,
             "allowed_mentions": {"parse": []},
         }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        webhook_url,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
     )
-    with urllib.request.urlopen(
-        request, timeout=REQUEST_TIMEOUT_SECONDS
-    ) as response:
-        if response.status not in (200, 204):
-            raise RuntimeError(
-                f"Discord webhook returned unexpected status {response.status}"
-            )
+    try:
+        response = requests.post(
+            webhook_url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except requests.RequestException as error:
+        raise RuntimeError(f"Discord webhook request failed: {error}") from error
+    if response.status_code not in (200, 204):
+        raise RuntimeError(
+            f"Discord webhook returned unexpected status {response.status_code}"
+        )
 
 
 def send_game_message(webhook_url, message):
     webhook_message(webhook_url, f"!message {message}")
 
 
-def send_countdown(webhook_url, package_version):
-    for index, minutes in enumerate(NOTICE_MINUTES):
-        if index:
-            time.sleep(NOTICE_DELAYS_SECONDS[index - 1])
+def _wait_for_countdown_delay(cancel_event, seconds):
+    if cancel_event.wait(seconds):
+        return False
+    return True
 
-        if minutes == 0:
+
+def send_countdown(webhook_url, package_version, cancel_event):
+    for index, minutes in enumerate(NOTICE_MINUTES):
+        if index and not _wait_for_countdown_delay(
+            cancel_event,
+            NOTICE_DELAYS_SECONDS[index - 1],
+        ):
             send_game_message(
                 webhook_url,
-                f"The server is restarting now to install modpack "
-                f"{package_version}.",
+                f"The restart for modpack {package_version} was cancelled "
+                "because the update could not be prepared.",
             )
-            webhook_message(webhook_url, "!save")
-            time.sleep(SAVE_SETTLE_SECONDS)
-            return
-
+            return False
         unit = "minute" if minutes == 1 else "minutes"
         send_game_message(
             webhook_url,
@@ -87,11 +261,36 @@ def send_countdown(webhook_url, package_version):
             f"{package_version}.",
         )
 
-    raise RuntimeError("Restart countdown ended without reaching zero")
+    if not _wait_for_countdown_delay(
+        cancel_event,
+        NOTICE_DELAYS_SECONDS[-1],
+    ):
+        send_game_message(
+            webhook_url,
+            f"The restart for modpack {package_version} was cancelled "
+            "because the update could not be prepared.",
+        )
+        return False
+    return True
+
+
+def announce_restart_and_save(webhook_url, package_version):
+    send_game_message(
+        webhook_url,
+        f"The server is restarting now to install modpack {package_version}.",
+    )
+    webhook_message(webhook_url, "!save")
+    time.sleep(SAVE_SETTLE_SECONDS)
 
 
 class TcAdminClient:
-    def __init__(self, panel_url, api_key, service_id):
+    def __init__(
+        self,
+        panel_url,
+        api_key,
+        service_id,
+        api_key_header="api_key",
+    ):
         parsed_url = urllib.parse.urlsplit(panel_url)
         if (
             parsed_url.scheme != "https"
@@ -104,77 +303,59 @@ class TcAdminClient:
             raise ValueError("TCADMIN_PANEL_URL must be an HTTPS base URL")
         if not api_key:
             raise ValueError("TCADMIN_API_KEY must not be empty")
-        if not service_id.isdigit():
+        if not service_id or not service_id.isdigit():
             raise ValueError("TCADMIN_SERVICE_ID must be numeric")
+        if not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", api_key_header):
+            raise ValueError("GTX_API_KEY_HEADER must be a valid HTTP header")
 
         self.panel_url = panel_url.rstrip("/")
         self.api_key = api_key
+        self.api_key_header = api_key_header
         self.service_id = service_id
         self.service_path = (
             f"/api/service/{urllib.parse.quote(service_id, safe='')}"
         )
 
-    def _request(
-        self,
-        method,
-        path,
-        fields=None,
-        timeout=REQUEST_TIMEOUT_SECONDS,
-    ):
+    def _request(self, method, path, fields=None):
+        url = self.panel_url + path
         headers = {
             "Accept": "application/json",
-            "api_key": self.api_key,
+            self.api_key_header: self.api_key,
         }
-        data = None
-        if method == "POST":
-            boundary = "----Starfinders" + uuid.uuid4().hex
-            body = []
-            for key, value in (fields or {}).items():
-                body.append(
-                    (
-                        f"--{boundary}\r\n"
-                        f'Content-Disposition: form-data; name="{key}"\r\n\r\n'
-                        f"{value}\r\n"
-                    ).encode("utf-8")
-                )
-            body.append(f"--{boundary}--\r\n".encode("ascii"))
-            data = b"".join(body)
-            headers["Content-Type"] = (
-                f"multipart/form-data; boundary={boundary}"
-            )
-
-        request = urllib.request.Request(
-            self.panel_url + path,
-            data=data,
-            headers=headers,
-            method=method,
-        )
         try:
-            with urllib.request.urlopen(
-                request, timeout=timeout
-            ) as response:
-                payload = response.read()
-                status_code = response.status
-        except urllib.error.HTTPError as error:
-            detail = error.read().decode("utf-8", errors="replace")[:500]
+            if method == "POST":
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    files={
+                        key: (None, value)
+                        for key, value in (fields or {}).items()
+                    },
+                    timeout=REQUEST_TIMEOUT_SECONDS,
+                )
+            else:
+                response = requests.get(
+                    url,
+                    headers=headers,
+                    timeout=REQUEST_TIMEOUT_SECONDS,
+                )
+            response.raise_for_status()
+        except requests.HTTPError as error:
+            response = error.response
+            detail = response.text[:500] if response is not None else str(error)
             raise RuntimeError(
-                f"TCAdmin {method} request failed with HTTP "
-                f"{error.code}: {detail}"
+                f"TCAdmin {method} request to {url} failed with HTTP "
+                f"{response.status_code if response is not None else 'error'}"
+                f": {detail}"
+            ) from error
+        except requests.RequestException as error:
+            raise RuntimeError(
+                f"TCAdmin {method} request to {url} failed: {error}"
             ) from error
 
-        return self._validate_response(payload, method, status_code)
-
-    @staticmethod
-    def _validate_response(payload, method, status_code):
-        if not 200 <= status_code < 300:
-            detail = payload.decode("utf-8", errors="replace")[:500]
-            raise RuntimeError(
-                f"TCAdmin {method} request failed with HTTP "
-                f"{status_code}: {detail}"
-            )
         try:
-            result = json.loads(payload.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            result = response.json()
+        except ValueError as error:
             raise RuntimeError(
                 f"TCAdmin {method} request returned invalid JSON"
             ) from error
@@ -213,28 +394,6 @@ class TcAdminClient:
             fields={"reason": "Starfinders modpack update"},
         )
 
-    def run_mod_update_script(self, script_id, mod_id):
-        if not script_id.isdigit() or not mod_id.isdigit():
-            raise ValueError("TCADMIN script and mod IDs must be numeric")
-
-        result = self._request(
-            "POST",
-            f"{self.service_path}/Script/"
-            f"{urllib.parse.quote(script_id, safe='')}",
-            fields={
-                "variables": "{}",
-                "runNow": "true",
-                "modId": mod_id,
-                "isGlobal": "false",
-            },
-            timeout=SCRIPT_TIMEOUT_SECONDS,
-        )
-        if not isinstance(result, dict) or result.get("RunNow") is not True:
-            raise RuntimeError(
-                "TCAdmin did not confirm immediate execution of the mod "
-                "update script"
-            )
-
     def start_service(self):
         self._request(
             "POST",
@@ -243,21 +402,102 @@ class TcAdminClient:
         )
 
 
+def _stage_packages(args, cancel_event):
+    return deploy_to_sftp(
+        "thunderstore.toml",
+        args.sftp_host,
+        args.sftp_port,
+        args.sftp_username,
+        args.sftp_password,
+        args.sftp_known_hosts,
+        args.sftp_remote_path,
+        cancel_event=cancel_event,
+    )
+
+
+def _prepare_update(args, cancel_event):
+    staged = None
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        deployment_future = executor.submit(_stage_packages, args, cancel_event)
+        countdown_future = executor.submit(
+            send_countdown,
+            args.discordbot_awl_webhook_url,
+            args.version,
+            cancel_event,
+        )
+        futures = (deployment_future, countdown_future)
+        done, _ = wait(futures, return_when=FIRST_EXCEPTION)
+        errors = [
+            future.exception()
+            for future in done
+            if not future.cancelled() and future.exception() is not None
+        ]
+        if errors:
+            cancel_event.set()
+            error = errors[0]
+            for future in futures:
+                try:
+                    result = future.result()
+                except OPERATION_ERRORS as future_error:
+                    if future_error not in errors:
+                        errors.append(future_error)
+                else:
+                    if future is deployment_future:
+                        staged = result
+            if len(errors) > 1:
+                logger.error(
+                    "Additional update preparation failure(s): %s",
+                    "; ".join(str(item) for item in errors[1:]),
+                )
+            if staged is not None:
+                try:
+                    discard_staged_deployment(
+                        staged,
+                        args.sftp_host,
+                        args.sftp_port,
+                        args.sftp_username,
+                        args.sftp_password,
+                        args.sftp_known_hosts,
+                    )
+                except (
+                    OSError,
+                    EOFError,
+                    RuntimeError,
+                    ValueError,
+                    paramiko.SFTPError,
+                    paramiko.SSHException,
+                ) as cleanup_error:
+                    logger.error(
+                        "Could not remove staged package files: %s",
+                        cleanup_error,
+                    )
+            raise error
+
+        staged = deployment_future.result()
+        countdown_complete = countdown_future.result()
+        if not countdown_complete:
+            raise RuntimeError("Restart countdown was cancelled")
+    return staged
+
+
 def report_failure(webhook_url, package_version, shutdown_attempted):
     if shutdown_attempted:
         logger.error(
             "Automatic mod update for modpack %s failed after a server stop "
-            "was requested. The service may remain stopped; check TCAdmin "
-            "and the configured update script.",
+            "was requested. The service may remain stopped; check TCAdmin and "
+            "the SFTP staging directory.",
             package_version,
         )
         return
 
-    send_game_message(
-        webhook_url,
-        f"Automatic mod update for modpack {package_version} failed before "
-        "the server was stopped. The server was left running.",
-    )
+    try:
+        send_game_message(
+            webhook_url,
+            f"Automatic mod update for modpack {package_version} failed "
+            "before the server was stopped. The server was left running.",
+        )
+    except (OSError, RuntimeError, ValueError) as error:
+        logger.error("Could not send the failure notice: %s", error)
 
 
 def update_server(args):
@@ -267,8 +507,11 @@ def update_server(args):
         args.tcadmin_panel_url,
         args.tcadmin_api_key,
         args.tcadmin_service_id,
+        args.tcadmin_api_key_header,
     )
     shutdown_attempted = False
+    staged = None
+    cancel_event = threading.Event()
     try:
         status = client.service_status()
         if status != 4:
@@ -277,20 +520,27 @@ def update_server(args):
                 f"running (ServiceStatus={status}, expected 4)"
             )
 
-        send_countdown(webhook_url, args.version)
+        logger.info(
+            "Starting package preparation and the 15-minute restart "
+            "countdown in parallel."
+        )
+        staged = _prepare_update(args, cancel_event)
+        announce_restart_and_save(webhook_url, args.version)
+
         logger.info("Stopping TCAdmin service %s.", args.tcadmin_service_id)
         shutdown_attempted = True
         client.stop_service()
         client.wait_for_status(1)
 
-        logger.info(
-            "Running TCAdmin mod-update script %s for mod %s.",
-            args.tcadmin_script_id,
-            args.tcadmin_mod_id,
-        )
-        client.run_mod_update_script(
-            args.tcadmin_script_id,
-            args.tcadmin_mod_id,
+        logger.info("Promoting staged plugin files over SFTP.")
+        promote_staged_deployment(
+            staged,
+            args.sftp_host,
+            args.sftp_port,
+            args.sftp_username,
+            args.sftp_password,
+            args.sftp_known_hosts,
+            args.sftp_remote_path,
         )
 
         logger.info("Starting TCAdmin service %s.", args.tcadmin_service_id)
@@ -300,57 +550,37 @@ def update_server(args):
             webhook_url,
             f"The server is back online with modpack {args.version}.",
         )
-    except (
-        OSError,
-        RuntimeError,
-        TimeoutError,
-        ValueError,
-        urllib.error.URLError,
-    ):
+    except OPERATION_ERRORS:
+        cancel_event.set()
+        if staged is not None and not shutdown_attempted:
+            try:
+                discard_staged_deployment(
+                    staged,
+                    args.sftp_host,
+                    args.sftp_port,
+                    args.sftp_username,
+                    args.sftp_password,
+                    args.sftp_known_hosts,
+                )
+            except (
+                OSError,
+                EOFError,
+                RuntimeError,
+                ValueError,
+                paramiko.SFTPError,
+                paramiko.SSHException,
+            ) as cleanup_error:
+                logger.error(
+                    "Could not remove staged package files: %s",
+                    cleanup_error,
+                )
         report_failure(webhook_url, args.version, shutdown_attempted)
         raise
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Run the GTXGaming mod updater after a Thunderstore release."
-    )
-    parser.add_argument("--version", required=True)
-    parser.add_argument(
-        "--tcadmin-panel-url",
-        default=os.environ.get("TCADMIN_PANEL_URL"),
-        required=os.environ.get("TCADMIN_PANEL_URL") is None,
-    )
-    parser.add_argument(
-        "--tcadmin-api-key",
-        default=os.environ.get("TCADMIN_API_KEY"),
-        required=os.environ.get("TCADMIN_API_KEY") is None,
-    )
-    parser.add_argument(
-        "--tcadmin-service-id",
-        default=os.environ.get("TCADMIN_SERVICE_ID"),
-        required=os.environ.get("TCADMIN_SERVICE_ID") is None,
-    )
-    parser.add_argument(
-        "--tcadmin-script-id",
-        default=os.environ.get("TCADMIN_SCRIPT_ID"),
-        required=os.environ.get("TCADMIN_SCRIPT_ID") is None,
-    )
-    parser.add_argument(
-        "--tcadmin-mod-id",
-        default=os.environ.get("TCADMIN_MOD_ID"),
-        required=os.environ.get("TCADMIN_MOD_ID") is None,
-    )
-    parser.add_argument(
-        "--discordbot-awl-webhook-url",
-        default=os.environ.get("DISCORDBOT_AWL_WEBHOOK_URL"),
-        required=os.environ.get("DISCORDBOT_AWL_WEBHOOK_URL") is None,
-    )
-    return parser.parse_args()
-
-
 def main():
-    update_server(parse_args())
+    args = parse_args()
+    update_server(args)
 
 
 if __name__ == "__main__":

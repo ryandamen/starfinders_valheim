@@ -1,0 +1,25 @@
+name: Notify Discord that the Valheim modpack update completed
+
+on:
+  workflow_call:
+    inputs:
+      package_version:
+        required: true
+        type: string
+    secrets:
+      discord_webhook_url:
+        required: true
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Discord that the modpack update completed
+        uses: Ilshidur/action-discord@ad5235de713df3ef38022185499b02ffe93b7efe
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.discord_webhook_url }}
+          PACKAGE_VERSION: ${{ inputs.package_version }}
+        with:
+          args: |
+            **The Starfinders Valheim modpack update has completed for {{ PACKAGE_VERSION }}.**
+            The server has been updated and restarted. Update the [modpack](https://thunderstore.io/c/valheim/p/Starfinders/starfinders_modpack/) before joining.
