@@ -11,7 +11,7 @@ containsNsfwContent = false
 
 [build]
 icon = "./icon.png"
-readme = "./README.md"
+readme = "./STARFINDERS_README"
 outdir = "./build"
 
 [package.dependencies]

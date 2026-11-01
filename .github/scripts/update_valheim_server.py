@@ -24,8 +24,8 @@ from thunderstore_deployment import (
 REQUEST_TIMEOUT_SECONDS = 60
 STATUS_POLL_SECONDS = 10
 STATUS_TIMEOUT_SECONDS = 300
-NOTICE_DELAYS_SECONDS = (5 * 60, 5 * 60, 2 * 60, 60, 60, 60)
-NOTICE_MINUTES = (15, 10, 5, 3, 2, 1)
+NOTICE_DELAYS_SECONDS = (5 * 60, 2 * 60, 60, 60, 60)
+NOTICE_MINUTES = (10, 5, 3, 2, 1)
 AWL_WEBHOOK_USERNAME = "OnlyMods"
 SAVE_SETTLE_SECONDS = 30
 
@@ -257,8 +257,7 @@ def send_countdown(webhook_url, package_version, cancel_event):
         unit = "minute" if minutes == 1 else "minutes"
         send_game_message(
             webhook_url,
-            f"The server will restart in {minutes} {unit} to install modpack "
-            f"{package_version}.",
+            f"Server restarting in {minutes} {unit}.",
         )
 
     if not _wait_for_countdown_delay(
@@ -387,17 +386,10 @@ class TcAdminClient:
             f"within {STATUS_TIMEOUT_SECONDS} seconds"
         )
 
-    def stop_service(self):
+    def restart_service(self):
         self._request(
             "POST",
-            f"{self.service_path}/stop",
-            fields={"reason": "Starfinders modpack update"},
-        )
-
-    def start_service(self):
-        self._request(
-            "POST",
-            f"{self.service_path}/start",
+            f"{self.service_path}/restart",
             fields={"reason": "Starfinders modpack update"},
         )
 
@@ -480,12 +472,11 @@ def _prepare_update(args, cancel_event):
     return staged
 
 
-def report_failure(webhook_url, package_version, shutdown_attempted):
-    if shutdown_attempted:
+def report_failure(webhook_url, package_version, restart_attempted):
+    if restart_attempted:
         logger.error(
-            "Automatic mod update for modpack %s failed after a server stop "
-            "was requested. The service may remain stopped; check TCAdmin and "
-            "the SFTP staging directory.",
+            "Automatic mod update for modpack %s failed after a server "
+            "restart was requested. Check TCAdmin and the server status.",
             package_version,
         )
         return
@@ -494,7 +485,7 @@ def report_failure(webhook_url, package_version, shutdown_attempted):
         send_game_message(
             webhook_url,
             f"Automatic mod update for modpack {package_version} failed "
-            "before the server was stopped. The server was left running.",
+            "before a restart was requested. The server was left running.",
         )
     except (OSError, RuntimeError, ValueError) as error:
         logger.error("Could not send the failure notice: %s", error)
@@ -509,7 +500,8 @@ def update_server(args):
         args.tcadmin_service_id,
         args.tcadmin_api_key_header,
     )
-    shutdown_attempted = False
+    promotion_attempted = False
+    restart_attempted = False
     staged = None
     cancel_event = threading.Event()
     try:
@@ -521,18 +513,14 @@ def update_server(args):
             )
 
         logger.info(
-            "Starting package preparation and the 15-minute restart "
+            "Starting package preparation and the 10-minute restart "
             "countdown in parallel."
         )
         staged = _prepare_update(args, cancel_event)
-        announce_restart_and_save(webhook_url, args.version)
-
-        logger.info("Stopping TCAdmin service %s.", args.tcadmin_service_id)
-        shutdown_attempted = True
-        client.stop_service()
-        client.wait_for_status(1)
-
-        logger.info("Promoting staged plugin files over SFTP.")
+        logger.info(
+            "Promoting staged plugin files while the server is running."
+        )
+        promotion_attempted = True
         promote_staged_deployment(
             staged,
             args.sftp_host,
@@ -543,8 +531,12 @@ def update_server(args):
             args.sftp_remote_path,
         )
 
-        logger.info("Starting TCAdmin service %s.", args.tcadmin_service_id)
-        client.start_service()
+        announce_restart_and_save(webhook_url, args.version)
+
+        logger.info("Restarting TCAdmin service %s.", args.tcadmin_service_id)
+        restart_attempted = True
+        client.restart_service()
+        client.wait_for_status(1)
         client.wait_for_status(4)
         send_game_message(
             webhook_url,
@@ -552,7 +544,7 @@ def update_server(args):
         )
     except OPERATION_ERRORS:
         cancel_event.set()
-        if staged is not None and not shutdown_attempted:
+        if staged is not None and not promotion_attempted:
             try:
                 discard_staged_deployment(
                     staged,
@@ -574,7 +566,7 @@ def update_server(args):
                     "Could not remove staged package files: %s",
                     cleanup_error,
                 )
-        report_failure(webhook_url, args.version, shutdown_attempted)
+        report_failure(webhook_url, args.version, restart_attempted)
         raise
 
 

@@ -56,6 +56,7 @@ class StagedDeployment:
     files: tuple[str, ...]
     staged_files: tuple[str, ...] | None = None
     replace_mods: tuple[str, ...] = ()
+    remote_backup_path: str | None = None
 
 
 class ThunderstoreClient:
@@ -514,6 +515,31 @@ def _remove_remote_tree(sftp, path):
     sftp.rmdir(path)
 
 
+def _remote_files(sftp, path):
+    files = []
+    for item in sftp.listdir_attr(path):
+        child = posixpath.join(path, item.filename)
+        if stat.S_ISDIR(item.st_mode):
+            files.extend(_remote_files(sftp, child))
+        else:
+            files.append(child)
+    return files
+
+
+def _backup_remote_file(sftp, source, backup, backups):
+    try:
+        attributes = sftp.lstat(source)
+    except OSError as error:
+        if getattr(error, "errno", None) == errno.ENOENT:
+            return
+        raise
+    if not stat.S_ISREG(attributes.st_mode):
+        raise RuntimeError(f"Cannot replace non-file plugin path: {source}")
+    _ensure_remote_directory(sftp, posixpath.dirname(backup))
+    sftp.rename(source, backup)
+    backups.append((backup, source))
+
+
 def stage_plugin_files(
     local_root,
     files,
@@ -534,10 +560,12 @@ def stage_plugin_files(
         parent,
         f".starfinders-staging-{uuid.uuid4().hex}",
     )
+    backup_path = f"{stage_path}-backup"
     ssh, sftp = _connect_sftp(host, port, username, password, known_hosts)
     try:
         _ensure_remote_directory(sftp, parent)
         sftp.mkdir(stage_path)
+        sftp.mkdir(backup_path)
         staged_files = []
         replace_mods = []
         file_groups = {}
@@ -600,6 +628,7 @@ def stage_plugin_files(
             tuple(files),
             tuple(staged_files),
             tuple(replace_mods),
+            backup_path,
         )
     except (
         OSError,
@@ -611,6 +640,7 @@ def stage_plugin_files(
     ):
         try:
             _remove_remote_tree(sftp, stage_path)
+            _remove_remote_tree(sftp, backup_path)
         except (
             OSError,
             EOFError,
@@ -635,6 +665,8 @@ def discard_staged_deployment(
     ssh, sftp = _connect_sftp(host, port, username, password, known_hosts)
     try:
         _remove_remote_tree(sftp, staged.remote_stage_path)
+        if staged.remote_backup_path is not None:
+            _remove_remote_tree(sftp, staged.remote_backup_path)
     finally:
         sftp.close()
         ssh.close()
@@ -670,20 +702,12 @@ def promote_staged_deployment(
                 if len(relative_path.parts) > 1
             )
 
+        existing_mod_files = {}
         for mod_name in sorted(replaced_mods):
-            staged_mod_path = posixpath.join(
-                staged.remote_stage_path,
-                mod_name,
-            )
             target_mod_path = posixpath.join(
                 remote_directory,
                 mod_name,
             )
-            backup_mod_path = posixpath.join(
-                staged.remote_stage_path,
-                f".backup-{uuid.uuid4().hex}",
-            )
-            had_existing_mod = False
             try:
                 attributes = sftp.lstat(target_mod_path)
             except OSError as error:
@@ -695,35 +719,141 @@ def promote_staged_deployment(
                         f"Cannot replace non-directory mod folder: "
                         f"{target_mod_path}"
                     )
-                sftp.rename(target_mod_path, backup_mod_path)
-                had_existing_mod = True
+                existing_mod_files[mod_name] = _remote_files(
+                    sftp,
+                    target_mod_path,
+                )
+
+        backup_path = staged.remote_backup_path or (
+            f"{staged.remote_stage_path}-backup"
+        )
+        backups = []
+        installed_files = []
+        try:
+            for relative_name in files_to_promote:
+                relative_path = _validate_relative_plugin_path(relative_name)
+                remote_source = posixpath.join(
+                    staged.remote_stage_path,
+                    *relative_path.parts,
+                )
+                remote_target = posixpath.join(
+                    remote_directory,
+                    *relative_path.parts,
+                )
+                remote_backup = posixpath.join(
+                    backup_path,
+                    *relative_path.parts,
+                )
+                _ensure_remote_directory(
+                    sftp,
+                    posixpath.dirname(remote_target),
+                )
+                _backup_remote_file(
+                    sftp,
+                    remote_target,
+                    remote_backup,
+                    backups,
+                )
+                sftp.rename(remote_source, remote_target)
+                installed_files.append(remote_target)
+
+            new_files = {
+                _validate_relative_plugin_path(name).as_posix()
+                for name in files_to_promote
+            }
+            for mod_name, old_files in existing_mod_files.items():
+                for old_file in old_files:
+                    relative_name = posixpath.relpath(
+                        old_file,
+                        posixpath.join(remote_directory, mod_name),
+                    )
+                    managed_name = PurePosixPath(
+                        mod_name,
+                        relative_name,
+                    ).as_posix()
+                    if managed_name in new_files:
+                        continue
+                    relative_path = _validate_relative_plugin_path(
+                        managed_name
+                    )
+                    _backup_remote_file(
+                        sftp,
+                        old_file,
+                        posixpath.join(backup_path, *relative_path.parts),
+                        backups,
+                    )
+        except (
+            OSError,
+            EOFError,
+            paramiko.SFTPError,
+            paramiko.SSHException,
+            RuntimeError,
+            ValueError,
+        ) as error:
+            rollback_errors = []
+            for remote_target in reversed(installed_files):
+                try:
+                    _remove_existing_file(sftp, remote_target)
+                except (
+                    OSError,
+                    EOFError,
+                    paramiko.SFTPError,
+                    paramiko.SSHException,
+                    RuntimeError,
+                    ValueError,
+                ) as rollback_error:
+                    rollback_errors.append(rollback_error)
+            for remote_backup, remote_target in reversed(backups):
+                try:
+                    _ensure_remote_directory(
+                        sftp,
+                        posixpath.dirname(remote_target),
+                    )
+                    _remove_existing_file(sftp, remote_target)
+                    sftp.rename(remote_backup, remote_target)
+                except (
+                    OSError,
+                    EOFError,
+                    paramiko.SFTPError,
+                    paramiko.SSHException,
+                    RuntimeError,
+                    ValueError,
+                ) as rollback_error:
+                    rollback_errors.append(rollback_error)
+            if rollback_errors:
+                logger.error(
+                    "SFTP promotion failed and rollback was incomplete: %s",
+                    "; ".join(str(item) for item in rollback_errors),
+                )
+            else:
+                try:
+                    _remove_remote_tree(sftp, staged.remote_stage_path)
+                    _remove_remote_tree(sftp, backup_path)
+                except (
+                    OSError,
+                    EOFError,
+                    paramiko.SFTPError,
+                    paramiko.SSHException,
+                ):
+                    logger.exception(
+                        "Could not clean staging files after rollback."
+                    )
+            raise error
+
+        for path in (staged.remote_stage_path, backup_path):
             try:
-                sftp.rename(staged_mod_path, target_mod_path)
-            except (OSError, EOFError, paramiko.SFTPError):
-                if had_existing_mod:
-                    sftp.rename(backup_mod_path, target_mod_path)
-                raise
-            if had_existing_mod:
-                _remove_remote_tree(sftp, backup_mod_path)
-
-        for relative_name in files_to_promote:
-            relative_path = _validate_relative_plugin_path(relative_name)
-            if relative_path.parts[0] in replaced_mods and len(relative_path.parts) > 1:
-                continue
-            remote_source = posixpath.join(
-                staged.remote_stage_path,
-                *relative_path.parts,
-            )
-            remote_target = posixpath.join(
-                remote_directory,
-                *relative_path.parts,
-            )
-            remote_parent = posixpath.dirname(remote_target)
-            _ensure_remote_directory(sftp, remote_parent)
-            _remove_existing_file(sftp, remote_target)
-            sftp.rename(remote_source, remote_target)
-
-        _remove_remote_tree(sftp, staged.remote_stage_path)
+                _remove_remote_tree(sftp, path)
+            except (
+                OSError,
+                EOFError,
+                paramiko.SFTPError,
+                paramiko.SSHException,
+            ):
+                logger.exception(
+                    "Promotion succeeded, but SFTP staging cleanup failed "
+                    "for %s.",
+                    path,
+                )
     finally:
         sftp.close()
         ssh.close()

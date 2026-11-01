@@ -9,8 +9,8 @@ Modpack for the Starfinders private Valheim server.
 - `DISCORD_WEBHOOK_URL` the Discord webhook for completion/online notices
 - `DISCORDBOT_AWL_WEBHOOK_URL` the AWL command-channel webhook used for
   restart countdown and save messages
-- `TCADMIN_API_KEY` a TCAdmin API key with permission to read, stop, and start
-  this service
+- `TCADMIN_API_KEY` a TCAdmin API key with permission to read and restart this
+  service
 - `TCADMIN_SERVICE_ID` the numeric TCAdmin service ID for the Valheim server
 - `SFTP_USERNAME` the username for the SFTP account
 - `SFTP_PASSWORD` the password for the SFTP account
@@ -60,7 +60,14 @@ See the [deployment workflow diagram](docs/workflow.mmd)
    - `[4 - Commands] Discord Admin` to include `OnlyMods`.
    - `[5 - Setup] BOT TOKEN` with the server's Discord bot token.
 4. Give the AWL bot permission to view the channel and read its message history.
-5. If you want to send AWL commands through a webhook, create one in its
-   configured command channel and confirm the webhook identity is authorized
-   in the plugin configuration. The update workflow uses
-   `DISCORDBOT_AWL_WEBHOOK_URL` for countdown, save, and restart messages.
+5. To allow `!message` and `!save` from the workflow webhook, configure AWL's
+   trusted incoming webhooks on the server in `[4 - Commands]`:
+   - `Allow Trusted Webhooks = On`
+   - `Trusted Webhooks` to
+     `<webhook-id>:<command-channel-id>:<guild-id>`
+   - `Trusted Webhook Command Allowlist = !message,!save`
+   The webhook ID is the numeric ID in the webhook URL; keep the full URL/token
+   secret. The channel ID must match `[4 - Commands] Channel ID`. This trusted
+   webhook setting is separate from `Discord Admin`, which is for human users.
+   The update workflow uses `DISCORDBOT_AWL_WEBHOOK_URL` for countdown, save,
+   and restart messages.

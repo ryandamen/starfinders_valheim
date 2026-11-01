@@ -148,7 +148,7 @@ class TcAdminTests(unittest.TestCase):
             "https://panel.example/api/service/123",
         )
 
-    def test_stop_and_start_use_tcadmin_service_endpoints(self):
+    def test_restart_uses_tcadmin_service_endpoint(self):
         client = updater.TcAdminClient(
             "https://panel.example",
             "secret",
@@ -156,20 +156,14 @@ class TcAdminTests(unittest.TestCase):
         )
         client._request = mock.Mock()
 
-        client.stop_service()
-        client.start_service()
+        client.restart_service()
 
         self.assertEqual(
             client._request.call_args_list,
             [
                 mock.call(
                     "POST",
-                    "/api/service/123/stop",
-                    fields={"reason": "Starfinders modpack update"},
-                ),
-                mock.call(
-                    "POST",
-                    "/api/service/123/start",
+                    "/api/service/123/restart",
                     fields={"reason": "Starfinders modpack update"},
                 ),
             ],
@@ -199,7 +193,7 @@ class TcAdminTests(unittest.TestCase):
 
 
 class CountdownTests(unittest.TestCase):
-    def test_preserves_existing_warning_minutes(self):
+    def test_uses_requested_restart_warning_minutes(self):
         messages = []
         with (
             mock.patch.object(
@@ -222,17 +216,15 @@ class CountdownTests(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(
             [
-                "15 minutes",
-                "10 minutes",
-                "5 minutes",
-                "3 minutes",
-                "2 minutes",
-                "1 minute",
+                "Server restarting in 10 minutes.",
+                "Server restarting in 5 minutes.",
+                "Server restarting in 3 minutes.",
+                "Server restarting in 2 minutes.",
+                "Server restarting in 1 minute.",
             ],
-            [message.split("restart in ", 1)[1].split(" to install", 1)[0]
-             for message in messages],
+            messages,
         )
-        self.assertEqual(wait_for_delay.call_count, 6)
+        self.assertEqual(wait_for_delay.call_count, 5)
 
     def test_package_preparation_and_countdown_run_concurrently(self):
         args = SimpleNamespace(
@@ -278,7 +270,7 @@ class UpdateSequenceTests(unittest.TestCase):
             sftp_remote_path="/server/BepInEx/plugins",
         )
 
-    def test_server_restarts_only_after_countdown_and_staging(self):
+    def test_server_restarts_after_live_promotion_and_save(self):
         calls = []
         staged = StagedDeployment("/stage", ("Example/plugin.dll",))
 
@@ -290,14 +282,11 @@ class UpdateSequenceTests(unittest.TestCase):
                 calls.append("status")
                 return 4
 
-            def stop_service(self):
-                calls.append("stop")
-
             def wait_for_status(self, status):
                 calls.append(f"wait-{status}")
 
-            def start_service(self):
-                calls.append("start")
+            def restart_service(self):
+                calls.append("restart")
 
         with (
             mock.patch.object(updater, "TcAdminClient", FakeClient),
@@ -330,11 +319,10 @@ class UpdateSequenceTests(unittest.TestCase):
                 "client",
                 "status",
                 "prepare",
-                "save",
-                "stop",
-                "wait-1",
                 "promote",
-                "start",
+                "save",
+                "restart",
+                "wait-1",
                 "wait-4",
                 "online",
             ],
@@ -349,9 +337,6 @@ class UpdateSequenceTests(unittest.TestCase):
 
             def service_status(self):
                 return 4
-
-            def stop_service(self):
-                calls.append("stop")
 
         with (
             mock.patch.object(updater, "TcAdminClient", FakeClient),
@@ -371,7 +356,7 @@ class UpdateSequenceTests(unittest.TestCase):
 
         self.assertEqual(calls, ["failure-notice"])
 
-    def test_promotion_failure_does_not_start_server(self):
+    def test_promotion_failure_does_not_restart_server(self):
         calls = []
         staged = StagedDeployment("/stage", ("Example/plugin.dll",))
 
@@ -382,14 +367,8 @@ class UpdateSequenceTests(unittest.TestCase):
             def service_status(self):
                 return 4
 
-            def stop_service(self):
-                calls.append("stop")
-
-            def wait_for_status(self, status):
-                calls.append(f"wait-{status}")
-
-            def start_service(self):
-                calls.append("start")
+            def restart_service(self):
+                calls.append("restart")
 
         with (
             mock.patch.object(updater, "TcAdminClient", FakeClient),
@@ -400,11 +379,16 @@ class UpdateSequenceTests(unittest.TestCase):
                 "promote_staged_deployment",
                 side_effect=RuntimeError("promotion failed"),
             ),
+            mock.patch.object(
+                updater,
+                "send_game_message",
+                side_effect=lambda *_: calls.append("failure-notice"),
+            ),
             self.assertRaisesRegex(RuntimeError, "promotion failed"),
         ):
             updater.update_server(self.args)
 
-        self.assertEqual(calls, ["stop", "wait-1"])
+        self.assertEqual(calls, ["failure-notice"])
 
 
 if __name__ == "__main__":

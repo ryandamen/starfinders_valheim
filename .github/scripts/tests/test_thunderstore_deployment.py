@@ -1,5 +1,4 @@
 import io
-import posixpath
 import sys
 import stat
 import tempfile
@@ -307,6 +306,7 @@ class SftpPromotionTests(unittest.TestCase):
         def __init__(self):
             self.directories = {"/", "/server", "/server/BepInEx"}
             self.files = {}
+            self.fail_rename_source = None
 
         def stat(self, path):
             if path in self.directories:
@@ -332,36 +332,12 @@ class SftpPromotionTests(unittest.TestCase):
             return SftpPromotionTests.WritableRemoteFile(self, path)
 
         def rename(self, source, target):
+            if source == self.fail_rename_source:
+                raise OSError("Simulated file promotion failure")
             if source in self.files:
                 self.files[target] = self.files.pop(source)
                 return
-            if source not in self.directories:
-                raise FileNotFoundError(2, "not found", source)
-            source_prefix = source.rstrip("/") + "/"
-            moved_directories = {
-                path: (
-                    target
-                    if path == source
-                    else posixpath.join(
-                        target,
-                        path[len(source) :].lstrip("/"),
-                    )
-                )
-                for path in self.directories
-                if path == source or path.startswith(source_prefix)
-            }
-            moved_files = {
-                path: posixpath.join(
-                    target,
-                    path[len(source) :].lstrip("/"),
-                )
-                for path in self.files
-                if path.startswith(source_prefix)
-            }
-            self.directories.difference_update(moved_directories)
-            self.directories.update(moved_directories.values())
-            for old_path, new_path in moved_files.items():
-                self.files[new_path] = self.files.pop(old_path)
+            raise OSError("Directory rename is unsupported")
 
         def listdir_attr(self, path):
             prefix = path.rstrip("/") + "/"
@@ -585,6 +561,56 @@ class SftpPromotionTests(unittest.TestCase):
             "/server/BepInEx/plugins/Example/manual.cfg",
             sftp.files,
         )
+        self.assertFalse(
+            any("starfinders-staging" in path for path in sftp.directories)
+        )
+
+    def test_failed_file_promotion_restores_the_existing_mod_file(self):
+        sftp = self.FakeSftp()
+        target = "/server/BepInEx/plugins/Example/plugin.dll"
+        sftp.directories.add("/server/BepInEx/plugins")
+        sftp.directories.add("/server/BepInEx/plugins/Example")
+        sftp.files[target] = b"old assembly"
+
+        with tempfile.TemporaryDirectory() as directory:
+            local_root = Path(directory)
+            package_directory = local_root / "Example"
+            package_directory.mkdir()
+            package_file = package_directory / "plugin.dll"
+            package_file.write_bytes(b"new assembly")
+            with mock.patch.object(
+                deployment,
+                "_connect_sftp",
+                return_value=(self.FakeSsh(), sftp),
+            ):
+                staged = deployment.stage_plugin_files(
+                    local_root,
+                    ("Example/plugin.dll",),
+                    "server.example",
+                    8822,
+                    "user",
+                    "password",
+                    "[server.example]:8822 ssh-ed25519 key",
+                    "/server/BepInEx/plugins",
+                )
+                sftp.fail_rename_source = (
+                    staged.remote_stage_path + "/Example/plugin.dll"
+                )
+                with self.assertRaisesRegex(
+                    OSError,
+                    "Simulated file promotion failure",
+                ):
+                    deployment.promote_staged_deployment(
+                        staged,
+                        "server.example",
+                        8822,
+                        "user",
+                        "password",
+                        "[server.example]:8822 ssh-ed25519 key",
+                        "/server/BepInEx/plugins",
+                    )
+
+        self.assertEqual(sftp.files[target], b"old assembly")
         self.assertFalse(
             any("starfinders-staging" in path for path in sftp.directories)
         )
