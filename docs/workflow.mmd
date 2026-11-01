@@ -19,7 +19,6 @@ flowchart TD
         promote["Overwrite changed files in existing mod folders over SFTP<br/>Keep backups; remove obsolete files after transfer"]
         save["Send AWL save/restart message<br/>Wait for save to settle"]
         restart["Stop service; wait until stopped<br/>Then start and wait until running via TCAdmin"]
-        awlOnline["Send AWL server-online message"]
         failAfterStop["Report restart failure<br/>Check server status"]
         promotionFailed["Report transfer failure<br/>Rollback attempted; check SFTP if needed"]
 
@@ -33,7 +32,7 @@ flowchart TD
         staged --> ready
         ready -->|No| cancel
         ready -->|Yes| promote
-        promote --> save --> restart --> awlOnline
+        promote --> save --> restart
         promote -. "failure; roll back files" .-> promotionFailed
         restart -. "failure" .-> failAfterStop
     end
@@ -45,5 +44,5 @@ flowchart TD
 
     notify["notify-modpack-update.yml<br/>Post one update-complete/server-online notice to Discord"]
     release["create-release.yml<br/>Create GitHub release"]
-    awlOnline --> notify
-    awlOnline --> release
+    restart --> notify
+    restart --> release

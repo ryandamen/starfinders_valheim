@@ -333,11 +333,6 @@ class UpdateSequenceTests(unittest.TestCase):
                 "promote_staged_deployment",
                 side_effect=lambda *_: calls.append("promote"),
             ),
-            mock.patch.object(
-                updater,
-                "send_game_message",
-                side_effect=lambda *_: calls.append("online"),
-            ),
         ):
             updater.update_server(self.args)
 
@@ -353,7 +348,6 @@ class UpdateSequenceTests(unittest.TestCase):
                 "wait-1",
                 "start",
                 "wait-4",
-                "online",
             ],
         )
 

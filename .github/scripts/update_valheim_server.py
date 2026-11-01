@@ -547,10 +547,6 @@ def update_server(args):
         logger.info("Starting TCAdmin service %s.", args.tcadmin_service_id)
         client.start_service()
         client.wait_for_status(4)
-        send_game_message(
-            webhook_url,
-            f"The server is back online with modpack {args.version}.",
-        )
     except OPERATION_ERRORS:
         cancel_event.set()
         if staged is not None and not promotion_attempted:
