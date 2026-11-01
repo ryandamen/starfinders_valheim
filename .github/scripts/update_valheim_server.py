@@ -24,8 +24,8 @@ from thunderstore_deployment import (
 REQUEST_TIMEOUT_SECONDS = 60
 STATUS_POLL_SECONDS = 1
 STATUS_TIMEOUT_SECONDS = 300
-NOTICE_DELAYS_SECONDS = (5 * 60, 2 * 60, 60, 60, 60)
-NOTICE_MINUTES = (10, 5, 3, 2, 1)
+NOTICE_DELAYS_SECONDS = (60, 60, 60, 60, 60)
+NOTICE_MINUTES = (5, 4, 3, 2, 1)
 AWL_WEBHOOK_USERNAME = "OnlyMods"
 SAVE_SETTLE_SECONDS = 15
 
@@ -386,10 +386,17 @@ class TcAdminClient:
             f"within {STATUS_TIMEOUT_SECONDS} seconds"
         )
 
-    def restart_service(self):
+    def stop_service(self):
         self._request(
             "POST",
-            f"{self.service_path}/restart",
+            f"{self.service_path}/stop",
+            fields={"reason": "Starfinders modpack update"},
+        )
+
+    def start_service(self):
+        self._request(
+            "POST",
+            f"{self.service_path}/start",
             fields={"reason": "Starfinders modpack update"},
         )
 
@@ -513,7 +520,7 @@ def update_server(args):
             )
 
         logger.info(
-            "Starting package preparation and the 10-minute restart "
+            "Starting package preparation and the 5-minute restart "
             "countdown in parallel."
         )
         staged = _prepare_update(args, cancel_event)
@@ -533,10 +540,12 @@ def update_server(args):
 
         announce_restart_and_save(webhook_url, args.version)
 
-        logger.info("Restarting TCAdmin service %s.", args.tcadmin_service_id)
+        logger.info("Stopping TCAdmin service %s.", args.tcadmin_service_id)
         restart_attempted = True
-        client.restart_service()
+        client.stop_service()
         client.wait_for_status(1)
+        logger.info("Starting TCAdmin service %s.", args.tcadmin_service_id)
+        client.start_service()
         client.wait_for_status(4)
         send_game_message(
             webhook_url,

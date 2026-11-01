@@ -148,7 +148,7 @@ class TcAdminTests(unittest.TestCase):
             "https://panel.example/api/service/123",
         )
 
-    def test_restart_uses_tcadmin_service_endpoint(self):
+    def test_stop_and_start_use_tcadmin_service_endpoints(self):
         client = updater.TcAdminClient(
             "https://panel.example",
             "secret",
@@ -156,14 +156,20 @@ class TcAdminTests(unittest.TestCase):
         )
         client._request = mock.Mock()
 
-        client.restart_service()
+        client.stop_service()
+        client.start_service()
 
         self.assertEqual(
             client._request.call_args_list,
             [
                 mock.call(
                     "POST",
-                    "/api/service/123/restart",
+                    "/api/service/123/stop",
+                    fields={"reason": "Starfinders modpack update"},
+                ),
+                mock.call(
+                    "POST",
+                    "/api/service/123/start",
                     fields={"reason": "Starfinders modpack update"},
                 ),
             ],
@@ -235,8 +241,8 @@ class CountdownTests(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(
             [
-                "Server restarting in 10 minutes.",
                 "Server restarting in 5 minutes.",
+                "Server restarting in 4 minutes.",
                 "Server restarting in 3 minutes.",
                 "Server restarting in 2 minutes.",
                 "Server restarting in 1 minute.",
@@ -304,8 +310,11 @@ class UpdateSequenceTests(unittest.TestCase):
             def wait_for_status(self, status):
                 calls.append(f"wait-{status}")
 
-            def restart_service(self):
-                calls.append("restart")
+            def stop_service(self):
+                calls.append("stop")
+
+            def start_service(self):
+                calls.append("start")
 
         with (
             mock.patch.object(updater, "TcAdminClient", FakeClient),
@@ -340,8 +349,9 @@ class UpdateSequenceTests(unittest.TestCase):
                 "prepare",
                 "promote",
                 "save",
-                "restart",
+                "stop",
                 "wait-1",
+                "start",
                 "wait-4",
                 "online",
             ],
@@ -386,8 +396,8 @@ class UpdateSequenceTests(unittest.TestCase):
             def service_status(self):
                 return 4
 
-            def restart_service(self):
-                calls.append("restart")
+            def stop_service(self):
+                calls.append("stop")
 
         with (
             mock.patch.object(updater, "TcAdminClient", FakeClient),

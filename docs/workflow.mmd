@@ -8,7 +8,7 @@ flowchart TD
     subgraph deploy["update-valheim-server.yml"]
         start["Install Python project dependencies<br/>Start deployment script"]
         parallel{"Run in parallel"}
-        countdown["Send restart warnings<br/>10, 5, 3, 2, 1 minutes"]
+        countdown["Send restart warnings<br/>5, 4, 3, 2, 1 minutes"]
         packages["Resolve pinned mods and transitive dependencies<br/>Download archives and extract plugin files and manifests"]
         compare{"Compare each installed mod manifest.json<br/>SHA-256 with package manifest?"}
         unchanged["Skip mod folder<br/>when manifest matches and files exist"]
@@ -18,7 +18,7 @@ flowchart TD
         cancel["Cancel restart<br/>Leave server running"]
         promote["Overwrite changed files in existing mod folders over SFTP<br/>Keep backups; remove obsolete files after transfer"]
         save["Send AWL save/restart message<br/>Wait for save to settle"]
-        restart["Restart Valheim service via TCAdmin<br/>Wait until stopped and running"]
+        restart["Stop service; wait until stopped<br/>Then start and wait until running via TCAdmin"]
         awlOnline["Send AWL server-online message"]
         failAfterStop["Report restart failure<br/>Check server status"]
         promotionFailed["Report transfer failure<br/>Rollback attempted; check SFTP if needed"]
