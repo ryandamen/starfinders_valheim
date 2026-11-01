@@ -49,6 +49,7 @@ outdir = "./build"
 "ValheimModding-JsonDotNET" = "13.0.4"
 "ValheimModding-YamlDotNet" = "16.3.1"
 "Xenofell-TorchesEternal" = "0.2.0"
+"DeathMonger-TheGreatestPortal" = "1.2.2"
 
 
 [publish]
