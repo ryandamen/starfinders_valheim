@@ -258,12 +258,13 @@ def load_manifest_dependencies(manifest_path):
 
 
 def _plugin_relative_path(package, filename):
-    if "\\" in filename:
-        raise RuntimeError(
-            f"Package archive contains a non-portable path: {filename!r}"
-        )
+    filename = filename.replace("\\", "/")
     path = PurePosixPath(filename)
-    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+    if (
+        path.is_absolute()
+        or (path.parts and path.parts[0].endswith(":"))
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
         raise RuntimeError(
             f"Package archive contains an unsafe path: {filename!r}"
         )

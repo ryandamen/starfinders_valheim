@@ -9,13 +9,16 @@ flowchart TD
         start["Install Python project dependencies<br/>Start deployment script"]
         parallel{"Run in parallel"}
         countdown["Send restart warnings<br/>15, 10, 5, 3, 2, 1 minutes"]
-        packages["Resolve pinned mods and transitive dependencies<br/>Download archives and extract plugin files"]
-        staged["Upload files to temporary SFTP staging directory"]
+        packages["Resolve pinned mods and transitive dependencies<br/>Download archives and extract plugin files and manifests"]
+        compare{"Compare each installed mod manifest.json<br/>SHA-256 with package manifest?"}
+        unchanged["Skip mod folder<br/>when manifest matches and files exist"]
+        changed["Stage all files for changed/new mod folders"]
+        staged["Upload changed mod folders to temporary SFTP staging directory"]
         ready{"Countdown and staging<br/>both successful?"}
         cancel["Cancel restart<br/>Leave server running"]
         save["Send AWL save/restart message<br/>Wait for save to settle"]
         stop["Stop Valheim service via TCAdmin<br/>Wait until stopped"]
-        promote["Promote staged plugin files<br/>to BepInEx/plugins over SFTP"]
+        promote["Replace each changed mod folder<br/>under BepInEx/plugins over SFTP"]
         launch["Start service via TCAdmin<br/>Wait until running"]
         awlOnline["Send AWL server-online message"]
         failAfterStop["Report deployment failure<br/>Server may need manual recovery"]
@@ -23,7 +26,9 @@ flowchart TD
         start --> parallel
         parallel --> countdown
         parallel --> packages
-        packages --> staged
+        packages --> compare
+        compare -->|Match| unchanged
+        compare -->|Different or missing| changed --> staged
         countdown --> ready
         staged --> ready
         ready -->|No| cancel

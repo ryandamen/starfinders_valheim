@@ -209,6 +209,27 @@ class PackageExtractionTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "unsafe path"):
                 deployment.extract_plugin_files(package, payload, directory)
 
+    def test_normalizes_windows_separators_in_archive_paths(self):
+        package = deployment.PackageVersion(
+            "ValheimModding",
+            "Jotunn",
+            "2.30.2",
+            "ValheimModding-Jotunn-2.30.2",
+            "https://thunderstore.io/package/download/ValheimModding/Jotunn/2.30.2/",
+            (),
+        )
+        payload = self.make_archive(
+            {"plugins\\Jotunn.dll": b"assembly"}
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            files = deployment.extract_plugin_files(package, payload, directory)
+
+        self.assertEqual(
+            files,
+            {"ValheimModding-Jotunn/plugins/Jotunn.dll": b"assembly"},
+        )
+
     def test_rejects_symlink_payloads(self):
         output = io.BytesIO()
         with zipfile.ZipFile(output, "w") as archive:

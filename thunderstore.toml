@@ -27,6 +27,7 @@ outdir = "./build"
 "Digitalroot-Better_Wisps" = "1.0.44"
 "Digitalroot-Digitalroots_Slope_Combat_Assistance" = "2.0.30"
 "VerdantsAscent-FiresGhettoNetworking"= "1.5.72"
+"GetOffMyLawn-SilenceTameWolfCub" = "0.1.0"
 "FF15Vikings-VikingQoL" = "1.4.0"
 "ishid4-BetterArchery" = "2.0.5"
 "j1gA-LivingMap" = "0.19.2"
@@ -41,6 +42,8 @@ outdir = "./build"
 "ValheimModding-JsonDotNET" = "13.0.4"
 "ValheimModding-YamlDotNet" = "16.3.1"
 "Xenofell-TorchesEternal" = "0.2.0"
+
+
 
 [publish]
 repository = "https://thunderstore.io"
