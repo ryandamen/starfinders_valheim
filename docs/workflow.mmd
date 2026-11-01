@@ -43,9 +43,7 @@ flowchart TD
     listed -->|No, timeout| failListing
     listed -->|Yes| start
 
-    complete["notify-modpack-update.yml<br/>Post update-complete notice to Discord"]
-    online["notify-server-online.yml<br/>Post server-online notice to Discord"]
+    notify["notify-modpack-update.yml<br/>Post one update-complete/server-online notice to Discord"]
     release["create-release.yml<br/>Create GitHub release"]
-    awlOnline --> complete
-    awlOnline --> online
+    awlOnline --> notify
     awlOnline --> release

@@ -35,19 +35,10 @@ jobs:
       sftp_password: ${{ secrets.SFTP_PASSWORD }}
       sftp_known_hosts: ${{ secrets.SFTP_KNOWN_HOSTS }}
 
-  notify-modpack-update:
-    name: Notify Discord that the modpack update completed
+  notify:
+    name: Notify Discord that the server is back online
     needs: update-server
     uses: ./.github/workflows/notify-modpack-update.yml
-    with:
-      package_version: ${{ github.ref_name }}
-    secrets:
-      discord_webhook_url: ${{ secrets.DISCORD_WEBHOOK_URL }}
-
-  notify-server-online:
-    name: Notify Discord that the server is online
-    needs: update-server
-    uses: ./.github/workflows/notify-server-online.yml
     with:
       package_version: ${{ github.ref_name }}
     secrets:

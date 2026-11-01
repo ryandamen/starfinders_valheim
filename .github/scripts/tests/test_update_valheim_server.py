@@ -169,6 +169,25 @@ class TcAdminTests(unittest.TestCase):
             ],
         )
 
+    def test_wait_for_status_polls_every_second(self):
+        client = updater.TcAdminClient(
+            "https://panel.example",
+            "secret",
+            "123",
+        )
+        client.service_status = mock.Mock(side_effect=[2, 4])
+        with (
+            mock.patch.object(
+                updater.time,
+                "monotonic",
+                side_effect=[0, 0, 1],
+            ),
+            mock.patch.object(updater.time, "sleep") as sleep,
+        ):
+            client.wait_for_status(4)
+
+        sleep.assert_called_once_with(1)
+
     def test_failed_api_response_is_reported(self):
         response = mock.Mock()
         response.raise_for_status.return_value = None

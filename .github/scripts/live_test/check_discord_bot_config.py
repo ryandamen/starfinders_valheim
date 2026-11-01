@@ -3,7 +3,9 @@
 import argparse
 import os
 from pathlib import Path
+import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from update_valheim_server import (
     read_env_file,
     send_game_message,
