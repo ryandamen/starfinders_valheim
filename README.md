@@ -37,6 +37,8 @@ python .github/scripts/update_valheim_server.py --version 0.0.1
 Create a version tag and push it:
 
 ```bash
+git tag --sort=-version:refname | head -n 2
+# pick a version thats higher then the latest one e.g.
 VERSION=4.0.0
 git tag $VERSION && git push origin $VERSION
 ```

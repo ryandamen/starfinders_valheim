@@ -41,6 +41,7 @@ jobs:
               output.write("deps<<THUNDERSTORE_DEPS\n")
               output.write("\n".join(dependency_lines))
               output.write("\nTHUNDERSTORE_DEPS\n")
+          PY
         id: parsed-dependencies
 
       - name: Publish to ThunderStore
