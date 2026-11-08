@@ -62,7 +62,7 @@ outdir = "./build"
 "Wabbaka-AreaRepair" = "1.0.2"
 "Xenofell-TorchesEternal" = "0.2.0"
 "DeathMonger-TheGreatestPortal" = "1.2.2"
-
+"Sansara-BlastFurnaceOres" = "0.1.0"
 
 [publish]
 repository = "https://thunderstore.io"
