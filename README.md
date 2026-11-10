@@ -39,7 +39,7 @@ Create a version tag and push it:
 ```bash
 git tag --sort=-version:refname | head -n 2
 # pick a version thats higher then the latest one e.g.
-VERSION=4.0.0
+VERSION=4.2.0
 git tag $VERSION && git push origin $VERSION
 ```
 
