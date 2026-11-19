@@ -55,6 +55,8 @@ jobs:
           version: ${{ inputs.package_version }}
           repo: https://thunderstore.io
           path: .
+          icon: https://raw.githubusercontent.com/ryandamen/starfinders_valheim/refs/heads/main/icon.png
+          readme: https://raw.githubusercontent.com/ryandamen/starfinders_valheim/refs/heads/main/STARFINDERS_README.md
           deps: ${{ steps.parsed-dependencies.outputs.deps }}
 
           categories: |
